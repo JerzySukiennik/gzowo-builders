@@ -72,6 +72,7 @@ export class Builder {
     this._normal = new THREE.Vector3();
     this._normalMat = new THREE.Matrix3();
     this._invQ = new THREE.Quaternion();
+    this._origin = new THREE.Vector3();
   }
 
   get partId() { return HOTBAR[this.partIndex]; }
@@ -132,7 +133,12 @@ export class Builder {
     this._normal.copy(hit.face.normal).applyMatrix3(this._normalMat).normalize();
     const point = hit.point.clone();
     if (frame) {
-      frame.worldToLocal(point);
+      // A body's group sits at the body's origin and its part meshes hang off it
+      // by `centre - origin`, so group-local space is blueprint space shifted by
+      // the origin. Forgetting to shift back means every cell you compute on a
+      // construction is displaced — by the centre of that construction's
+      // bounding box, which grows as you build.
+      frame.worldToLocal(point).add(this._origin.fromArray(target.origin));
       this._normal.applyQuaternion(this._invQ.copy(frame.quaternion).invert());
     }
     this._normal.normalize();
