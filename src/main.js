@@ -95,15 +95,35 @@ async function boot() {
     saveState.textContent = saves.last;
   });
 
+  // If this page came from a host, join that host. Typing an address you are
+  // already looking at is a step nobody should have to work out, and the person
+  // most likely to be handed the link is the one least likely to guess it.
+  // The plain file server has no socket to answer, so solo play is unaffected.
+  const sameOrigin = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+  if (location.host) {
+    const probe = new WebSocket(sameOrigin);
+    probe.addEventListener('open', () => {
+      probe.close();
+      net.connect(sameOrigin, localStorage.getItem('gzowo-builders:name') || 'gracz');
+    });
+    probe.addEventListener('error', () => { /* solo, and that is fine */ });
+  }
+
   const joinBtn = document.getElementById('join-btn');
   const joinHost = document.getElementById('join-host');
   const joinName = document.getElementById('join-name');
   const joinState = document.getElementById('join-state');
-  net.onStatus = (t) => { joinState.textContent = t; };
+  joinName.value = localStorage.getItem('gzowo-builders:name') || '';
+  net.onStatus = (t) => {
+    joinState.textContent = t;
+    if (t === 'w grze') gateText.textContent = 'Grasz razem z innymi na tym samym świecie.';
+  };
   joinBtn.addEventListener('click', () => {
     const host = joinHost.value.trim();
     if (!host) return;
-    net.connect(host.includes(':') ? host : `${host}:3000`, joinName.value.trim() || 'gracz');
+    const name = joinName.value.trim() || 'gracz';
+    localStorage.setItem('gzowo-builders:name', name);
+    net.connect(host.includes(':') ? host : `${host}:3000`, name);
   });
   joinHost.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
   input.onLockChange = (locked) => {
