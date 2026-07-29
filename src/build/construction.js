@@ -308,9 +308,33 @@ export class Construction {
     if (rec.dynamic) {
       if (!rec.vehicle) rec.vehicle = new Vehicle(this, rec);
       rec.vehicle.rebuild();
-      if (!rec.vehicle.wheels.length && !rec.vehicle.seats.length) rec.vehicle = null;
+      const v = rec.vehicle;
+      // A wheel needs something to be a wheel *of*. A bare one that has just
+      // been torn off is debris: it should lie in the grass like any other part,
+      // not keep running a suspension that holds nothing up.
+      const isVehicle = v.seats.length > 0
+        || (v.wheels.length > 0 && v.wheels.length < rec.ids.size);
+      if (!isVehicle) rec.vehicle = null;
     } else if (rec.vehicle) {
       rec.vehicle = null;
+    }
+    this._refreshWheelFilters(rec);
+  }
+
+  /**
+   * A wheel is held off the ground by its suspension ray, so its collider is
+   * filtered off the terrain — otherwise ray and collider fight and the car
+   * buzzes. The moment that wheel stops being part of a vehicle, nothing holds
+   * it up any more and it falls straight through the meadow. So the filter is
+   * not a property of the part, it is a property of the part's *job*: a wheel
+   * doing suspension ignores terrain, a wheel lying in the grass does not.
+   */
+  _refreshWheelFilters(rec) {
+    for (const id of rec.ids) {
+      const def = PARTS[rec.bp.parts.get(id).partId];
+      if (def.shape !== 'wheel') continue;
+      const driving = !!rec.vehicle?.wheels.some((w) => w.id === id);
+      this.partCollider.get(id)?.setCollisionGroups(driving ? FILTER.WHEEL : FILTER.PART);
     }
   }
 

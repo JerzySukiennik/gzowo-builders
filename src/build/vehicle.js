@@ -108,12 +108,17 @@ export class Vehicle {
     const up = new THREE.Vector3(0, 1, 0);
     const roll = new THREE.Vector3().crossVectors(axle, up);
     if (roll.lengthSq() < 1e-6) roll.copy(this.forward); else roll.normalize();
-    if (roll.dot(this.forward) < 0) roll.negate();   // both sides roll the same way
+    // cross(axle, up) points opposite ways on the two sides of a car, so half
+    // the wheels would drive backwards. Flipping the rolling direction to match
+    // the vehicle also flips which way the wheel has to turn to roll that way —
+    // miss the second half and one side of the car spins backwards on screen.
+    const flipped = roll.dot(this.forward) < 0;
+    if (flipped) roll.negate();
     return {
       id, part, def, spec: def.wheel,
       local: this._localOf(part),
       axle, roll,
-      steers: false, steerAngle: 0,
+      steers: false, steerAngle: 0, spinSign: flipped ? -1 : 1,
       k: 0, c: 0,
       compression: 0, grounded: false, spin: 0, spinVel: 0,
     };
@@ -219,7 +224,7 @@ export class Vehicle {
       body.applyImpulseAtPoint(impulse, contact, true);
       this.appliedImpulse.add(impulse);
 
-      w.spinVel = vLong / w.spec.radius;
+      w.spinVel = w.spinSign * vLong / w.spec.radius;
       w.spin += w.spinVel * FIXED_DT;
       w.steerAngle = w.steers ? -steer * w.spec.steerAngle : 0;
     }
