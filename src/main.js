@@ -16,6 +16,8 @@ import { Hud } from './ui/hud.js';
 import { SLOTS_MAX } from './build/toolbars.js';
 import { Session } from './net/session.js';
 import { NetClient } from './net/client.js';
+import { Saves } from './net/save.js';
+import { Audio } from './audio.js';
 import { loadPartModels } from './render/models.js';
 
 
@@ -57,11 +59,13 @@ async function boot() {
   const input = new Input(renderer.domElement);
   const session = new Session(construction);
   const net = new NetClient(construction, session, scene);
+  const saves = new Saves(construction, net);
+  const audio = new Audio();
   const builder = new Builder(scene, construction, camera, worldTargets, session);
   const hud = new Hud();
 
   // Debug handle: the console is the only inspector this project has.
-  globalThis.GB = { THREE, scene, camera, renderer, world, RAPIER, player, construction, builder, input, hud, session, net };
+  globalThis.GB = { THREE, scene, camera, renderer, world, RAPIER, player, construction, builder, input, hud, session, net, saves, audio };
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
@@ -72,7 +76,22 @@ async function boot() {
   // --- the gate ------------------------------------------------------------
   loadingEl.hidden = true;
   gateBtn.hidden = false;
-  gateBtn.addEventListener('click', () => input.lock());
+  gateBtn.addEventListener('click', () => { audio.start(); input.lock(); });
+
+  const saveState = document.getElementById('save-state');
+  net.onNote = (t) => { saveState.textContent = t; };
+  document.getElementById('saves-row').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.slot-btn');
+    if (!btn) return;
+    if (btn.id === 'sound-btn') {
+      audio.start();
+      audio.setEnabled(!audio.enabled);
+      btn.textContent = `dźwięk: ${audio.enabled ? 'wł.' : 'wył.'}`;
+      return;
+    }
+    await saves[btn.dataset.act](btn.dataset.slot);
+    saveState.textContent = saves.last;
+  });
 
   const joinBtn = document.getElementById('join-btn');
   const joinHost = document.getElementById('join-host');
@@ -104,7 +123,7 @@ async function boot() {
     if (input.locked) {
       const look = input.takeLook();
       player.look(look.dx, look.dy);
-      handleEvents(input.drain(), builder, player);
+      handleEvents(input.drain(), builder, player, audio);
     }
 
     const drive = driveControls(input, player);
@@ -116,6 +135,11 @@ async function boot() {
     });
     construction.sync();
     net.report(player, drive.get(player.seat?.rec.key) ?? { throttle: 0, steer: 0, brake: false, mech: { extend: 0, turn: 0 } });
+
+    if (player.seat) {
+      const v = player.seat.rec.body.linvel();
+      audio.drive(Math.hypot(v.x, v.z), true);
+    } else audio.drive(0, false);
 
     player.applyToCamera(camera);
     // Keep the shadow frustum around the builder rather than the origin.
@@ -172,11 +196,13 @@ function interact(player, builder) {
   if (hit !== null && hit !== undefined) builder.session.interact(hit);
 }
 
-function handleEvents(events, builder, player) {
+function handleEvents(events, builder, player, audio) {
   for (const e of events) {
     if (e.type === 'mouse') {
-      if (e.button === 0) builder.primary();
-      else if (e.button === 2) builder.secondary();
+      if (e.button === 0) { const was = builder.construction.count; builder.primary();
+        if (builder.construction.count !== was) audio?.place(); }
+      else if (e.button === 2) { const was = builder.construction.count; builder.secondary();
+        if (builder.construction.count !== was) audio?.remove(); }
       else if (e.button === 1) builder.pipette();
     } else if (e.type === 'wheel') {
       if (builder.tool === 'paint') builder.cycleColor(e.dir);

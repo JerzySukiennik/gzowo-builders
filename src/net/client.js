@@ -11,7 +11,6 @@
 // are standing costs latency and buys nothing in a game with no winner.
 
 import * as THREE from 'three';
-import { Blueprint } from '../shared/blueprint.js';
 import { DOWN, PROTOCOL, UP, decode, encode } from './protocol.js';
 
 export class NetClient {
@@ -24,6 +23,7 @@ export class NetClient {
     this.status = 'offline';
     this.players = new Map();      // id -> { name, mesh }
     this.onStatus = null;
+    this.onNote = null;
     this._avatarGeo = new THREE.CapsuleGeometry(0.32, 1.16, 4, 8);
     this._avatarMat = new THREE.MeshStandardMaterial({ color: 0xe8442e, roughness: 0.7 });
     this._lastPose = 0;
@@ -84,6 +84,12 @@ export class NetClient {
       case DOWN.PLAYERS:
         this._players(msg.list);
         break;
+      case DOWN.WORLD:
+        this.c.restore(msg.world);
+        break;
+      case DOWN.NOTE:
+        this.onNote?.(msg.text);
+        break;
       case DOWN.BYE:
         this._drop(msg.id);
         break;
@@ -92,13 +98,7 @@ export class NetClient {
   }
 
   /** Rebuild the world exactly as the host has it. */
-  _loadWorld(world) {
-    this.c.clear();
-    for (const g of world.grids ?? []) {
-      this.c.adoptGrid(Blueprint.fromJSON(g.data), g.yard, g.released ?? [], g.pose ?? null);
-    }
-    this.c._nextPartId = Math.max(this.c._nextPartId, world.nextPartId ?? 1);
-  }
+  _loadWorld(world) { this.c.restore(world); }
 
   _players(list) {
     const alive = new Set();

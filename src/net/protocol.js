@@ -17,6 +17,8 @@ export const UP = {
   CMD: 'cmd',            // { verb, args }  — one change to the world
   POSE: 'pose',          // { p:[x,y,z], y:yaw, s:seatId|null } — where I am
   DRIVE: 'drive',        // { key, throttle, steer, brake, mech } — what I am driving
+  SAVE: 'save',          // { slot, world } — keep this world on the host's disk
+  LOAD: 'load',          // { slot } — and put it back for everybody
 };
 
 /** Server → client. */
@@ -27,6 +29,8 @@ export const DOWN = {
   PLAYERS: 'players',    // { list: [{ id, name, p, y, s }] }
   BYE: 'bye',            // { id }
   DENY: 'deny',          // { why }
+  WORLD: 'world',        // { world } — everyone reloads, after a host-side load
+  NOTE: 'note',          // { text } — one line for the menu
 };
 
 /** The verbs a client may ask for. Anything else is dropped on the floor. */

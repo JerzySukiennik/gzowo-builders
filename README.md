@@ -6,59 +6,78 @@ Mechanic*, ale z własną nazwą, własnym artem i bez kopiowania oryginału.
 
 ## Uruchomienie
 
+Sam ze sobą — wystarczy statyczny serwer bez cache:
+
 ```bash
 npm run serve
 ```
 
-Potem `http://localhost:8290`. Zero builda — three.js i Rapier lecą z CDN jako ES
-modules. Serwer multiplayer (`npm start`) dochodzi w fazie 7.
+Potem `http://localhost:8290`.
+
+Razem — jeden komputer hostuje, reszta wchodzi przeglądarką:
+
+```bash
+npm install
+npm start
+```
+
+Host wypisuje swój adres w sieci lokalnej. Pozostali otwierają ten adres albo
+wpisują go w polu „Gra z innymi" na karcie wejściowej. Zero builda po stronie
+klienta: three.js i Rapier lecą z CDN jako ES modules.
 
 ## Sterowanie
 
 | | |
 |---|---|
-| `WSAD` | ruch |
-| `SPACJA` / `SHIFT` | skok / bieg |
-| `LPM` / `PPM` / `ŚPM` | postaw / usuń / pipeta |
-| `R` / `SHIFT+R` | obrót w poziomie / położenie na bok |
-| `1`–`6`, `SCROLL` | wybór części |
-| `C` | tryb malowania (wtedy `SCROLL` zmienia kolor) |
-| `G` | puść konstrukcję / cofnij ją na kotwicę |
-| `E` | wsiądź do siedzenia / wysiądź |
-| `WSAD` w siedzeniu | gaz / hamulec-wstecz / skręt |
-| `ESC` | pauza |
+| `WSAD` / `SPACJA` / `SHIFT` | ruch, skok, bieg |
+| `LPM` | użyj tego, co trzymasz |
+| `PPM` | usuń |
+| `ŚPM` | pipeta |
+| `TAB` | następny pasek narzędzi |
+| `1`–`6`, `SCROLL` | slot na pasku |
+| `R` / `SHIFT+R` | obrót w poziomie / na bok |
+| `E` | wsiądź, wysiądź, przełącz |
+| `V` | kamera FPP / TPP w pojeździe |
+| `↑↓←→` | tłoki i obrotnice z fotela |
+| `ESC` | menu (zapis, wczytanie, dźwięk, dołączanie) |
+
+Paski narzędzi: **NARZĘDZIA** (usuwanie, malowanie, klonowanie, puść, kabel),
+**BLOKI**, **MASZYNY**, **LOGIKA**, **GOTOWCE**.
 
 ## Stan
 
-- **Faza 1 — gotowa.** Chodzenie FPP, siatka 0.25 m, snapping, sześć części
-  strukturalnych, malowanie, płaska łąka z rampami testowymi. Wszystko, co
-  postawisz, ma kolider — można po tym chodzić.
-- **Faza 2 — gotowa.** Jedna bryła sztywna na spójną konstrukcję, kotwiczenie do
-  ziemi, `G` = puść/cofnij, integralność strukturalna: przeciążone wsporniki
-  urywają się same, a uderzenia odrywają to, czego złącze nie utrzymało.
-- **Faza 3 — gotowa.** Własna siatka na konstrukcję (buduj na jadącym aucie),
-  koła na zawieszeniu raycastowym, silniki, siedzenie i jazda z fotela.
-- Fazy 4–9 — mechanizmy, logika, pełna łąka, multiplayer, zapis, dopieszczanie.
+Wszystkie fazy 0–9 z master promptu zbudowane. Czeka na playtest, zwłaszcza
+multiplayer na dwóch maszynach.
+
+## Zapis świata
+
+Menu na karcie wejściowej, trzy sloty. Sam ze sobą — pamięć przeglądarki.
+W grze — dysk hosta (`server/saves/`), więc świat przeżywa to, że ktoś wyszedł.
+Firebase RTDB włącza się sam, jeśli położysz `assets/firebase.json` z konfiguracją
+aplikacji webowej; celowo nie ma go w repo, bo publiczna konfiguracja to zaproszenie
+do cudzej bazy.
 
 ## Architektura
 
 ```
-src/shared/    czysta logika — importowana bez zmian przez klienta i (od fazy 7) serwer
-  grid.js        komórka 0.25 m, algebra orientacji (16 obrotów), testy styku ścian
-  parts.js       katalog części, gęstość, paleta
-  blueprint.js   co jest zbudowane: rekordy, indeks komórek, graf styków, komponenty
+src/shared/    czysta logika — importowana bez zmian przez klienta i serwer
+  grid.js        komórka 0.25 m, algebra orientacji, testy styku ścian
+  parts.js       katalog 18 części, gęstość, wytrzymałość złączy, paleta
+  blueprint.js   co zbudowane: rekordy, indeks komórek, graf styków, kable
+  prefabs.js     gotowe maszyny do stemplowania
+src/build/     construction.js (rdzeń: siatki, bryły, pękanie — działa headless),
+               builder.js (kursor), vehicle.js (koła raycastowe),
+               mechanisms.js (złącza), logic.js (układy), toolbars.js
+src/render/    construction-view.js (cała warstwa graficzna Construction),
+               geometry.js, materials.js, models.js
+src/net/       protocol.js, session.js (kto zmienia świat), client.js, save.js
+src/world/     terrain.js (pole wysokości), scatter.js (roślinność), meadow.js
 src/physics/   świat Rapiera, stały krok 1/60, grupy kolizji
-src/build/     construction.js (blueprint ↔ mesh ↔ kolider), builder.js (kursor),
-               vehicle.js (koła raycastowe, zawieszenie, napęd)
-src/render/    proceduralna geometria części, materiały palety
-src/player/    kinematyczny kontroler postaci FPP
-src/world/     łąka
-src/ui/        hotbar, paleta, linia stanu
-tools/         addon Blender MCP + skrypt startowy
-assets/models/ .glb z Blendera (dochodzą stopniowo, kolidery zostają prymitywne)
+server/        server.js (host: statyki + WebSocket + autorytatywna fizyka)
+tools/         parts.blend, addon Blender MCP, skrypt startowy
 ```
 
-Konsola ma uchwyt `GB` — `GB.construction`, `GB.player`, `GB.builder`, `GB.world`.
+Konsola ma uchwyt `GB` — `GB.construction`, `GB.session`, `GB.net`, `GB.saves`.
 
 ## Modele 3D
 

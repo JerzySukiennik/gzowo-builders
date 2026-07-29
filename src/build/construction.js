@@ -21,6 +21,8 @@
 
 import * as THREE from 'three';
 import { Blueprint, linkKey } from '../shared/blueprint.js';
+
+const BlueprintFrom = (data) => Blueprint.fromJSON(data);
 import { DENSITY, JOINT_STRENGTH_PER_CELL, PARTS } from '../shared/parts.js';
 
 const isPaintable = (partId) => PARTS[partId]?.paintable !== false;
@@ -721,6 +723,41 @@ export class Construction {
     this.mechanisms.syncVisuals();
     this.logic.syncVisuals();
     this.dirty = false;
+  }
+
+  /**
+   * The whole world as plain data: every grid, what is released, and where the
+   * loose ones are standing. This is the save file, the join packet and the
+   * thing a host hands a new player — one format, so a save that loads is a
+   * save that can also be joined.
+   */
+  snapshot() {
+    const grids = [];
+    const seen = new Set();
+    for (const rec of this.bodies.values()) {
+      if (seen.has(rec.bp)) continue;
+      seen.add(rec.bp);
+      const t = rec.body.translation(), q = rec.body.rotation();
+      grids.push({
+        yard: rec.bp === this.yard,
+        data: rec.bp.toJSON(),
+        released: [...this.released].filter((pid) => rec.bp.parts.has(pid)),
+        pose: rec.bp === this.yard ? null : { t: [t.x, t.y, t.z], q: [q.x, q.y, q.z, q.w] },
+      });
+    }
+    if (!seen.has(this.yard)) {
+      grids.push({ yard: true, data: this.yard.toJSON(), released: [], pose: null });
+    }
+    return { grids, nextPartId: this._nextPartId };
+  }
+
+  /** Replace everything with a snapshot. */
+  restore(worldData) {
+    this.clear();
+    for (const g of worldData?.grids ?? []) {
+      this.adoptGrid(BlueprintFrom(g.data), g.yard, g.released ?? [], g.pose ?? null);
+    }
+    this._nextPartId = Math.max(this._nextPartId, worldData?.nextPartId ?? 1);
   }
 
   /** Put a grid the host sent us on the ground, bodies and all. */

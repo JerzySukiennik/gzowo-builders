@@ -148,7 +148,16 @@
   }
   .join input::placeholder { color: var(--ink-45); }
   .btn.small { padding: 9px 18px; font-size: 11px; }
-  #join-state {
+  .slots { display: flex; gap: 6px; margin-bottom: 6px; }
+  .slot-btn {
+    flex: 1; cursor: pointer; text-align: center;
+    font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink); background: var(--paper-2);
+    border: 2px solid var(--ink); border-radius: 2px; padding: 8px 4px;
+    transition: background 90ms var(--ease);
+  }
+  .slot-btn:hover { background: var(--signal); }
+  #save-state, #join-state {
     margin-top: 8px; min-height: 14px;
     font: 500 10px/1.4 var(--mono); letter-spacing: 0.1em; color: var(--ink-70);
   }
@@ -176,6 +185,21 @@
     <p id="gate-text">Buduj z klocków, testuj na miejscu, patrz jak się rozpada.</p>
     <div id="loading">ŁADOWANIE…</div>
     <div class="btn" id="gate-btn" hidden>Wejdź</div>
+    <div class="join" id="saves-row">
+      <div class="join-title">Świat</div>
+      <div class="slots">
+        <span class="slot-btn" data-act="save" data-slot="A">zapisz A</span>
+        <span class="slot-btn" data-act="save" data-slot="B">zapisz B</span>
+        <span class="slot-btn" data-act="save" data-slot="C">zapisz C</span>
+      </div>
+      <div class="slots">
+        <span class="slot-btn" data-act="load" data-slot="A">wczytaj A</span>
+        <span class="slot-btn" data-act="load" data-slot="B">wczytaj B</span>
+        <span class="slot-btn" data-act="load" data-slot="C">wczytaj C</span>
+      </div>
+      <div class="slots"><span class="slot-btn" id="sound-btn">dźwięk: wł.</span></div>
+      <div id="save-state"></div>
+    </div>
     <div class="join">
       <div class="join-title">Gra z innymi — wpisz adres hosta</div>
       <input id="join-host" placeholder="np. 192.168.0.12:3000" spellcheck="false">

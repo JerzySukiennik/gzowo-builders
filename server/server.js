@@ -13,7 +13,7 @@
 // Everyone else opens http://<your LAN address>:3000 in a browser.
 
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
@@ -84,6 +84,13 @@ wss.on('connection', (ws) => {
       const result = session.apply(msg.verb, msg.args);
       if (result === null || result === false) return;
       broadcast(encode(DOWN.CMD, { verb: msg.verb, args: msg.args, by: id }));
+    } else if (msg.type === UP.SAVE) {
+      keepWorld(msg.slot, msg.world).then((note) => ws.send(encode(DOWN.NOTE, { text: note })));
+    } else if (msg.type === UP.LOAD) {
+      restoreWorld(msg.slot).then((note) => {
+        broadcast(encode(DOWN.NOTE, { text: note }));
+        broadcast(encode(DOWN.WORLD, { world: construction.snapshot() }));
+      });
     } else if (msg.type === UP.POSE) {
       client.pose = { p: msg.p, y: msg.y, s: msg.s ?? null };
     } else if (msg.type === UP.DRIVE) {
@@ -103,29 +110,30 @@ function broadcast(payload, except = null) {
 }
 
 /** Everything a joining player needs to build the world exactly as it is. */
-function snapshot() {
-  const grids = [];
-  const seen = new Set();
-  for (const rec of construction.bodies.values()) {
-    if (seen.has(rec.bp)) continue;
-    seen.add(rec.bp);
-    grids.push({
-      yard: rec.bp === construction.yard,
-      data: rec.bp.toJSON(),
-      released: [...construction.released].filter((pid) => rec.bp.parts.has(pid)),
-      pose: rec.bp === construction.yard ? null : bodyPose(rec),
-    });
+const snapshot = () => construction.snapshot();
+
+const SAVES = join(ROOT, 'server', 'saves');
+const slotPath = (slot) => join(SAVES, `${String(slot).replace(/[^A-Za-z0-9_-]/g, '')}.json`);
+
+async function keepWorld(slot, world) {
+  try {
+    await mkdir(SAVES, { recursive: true });
+    await writeFile(slotPath(slot), JSON.stringify(world));
+    return `zapisano świat w slocie ${slot}`;
+  } catch (err) {
+    return `nie udało się zapisać: ${err.message}`;
   }
-  if (!seen.has(construction.yard)) {
-    grids.push({ yard: true, data: construction.yard.toJSON(), released: [], pose: null });
-  }
-  return { grids, nextPartId: construction._nextPartId };
 }
 
-const bodyPose = (rec) => {
-  const t = rec.body.translation(), q = rec.body.rotation();
-  return { t: [t.x, t.y, t.z], q: [q.x, q.y, q.z, q.w] };
-};
+async function restoreWorld(slot) {
+  try {
+    const world = JSON.parse(await readFile(slotPath(slot), 'utf8'));
+    construction.restore(world);
+    return `wczytano świat ze slotu ${slot}`;
+  } catch {
+    return `slot ${slot} jest pusty`;
+  }
+}
 
 // --- the loop ----------------------------------------------------------------
 let lastBodies = 0;
