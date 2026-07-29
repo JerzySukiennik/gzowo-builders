@@ -90,18 +90,27 @@ export class Construction {
     return !!rec && !rec.dynamic;
   }
 
-  /** Which grid a placement lands in — a body you pointed at, or the yard. */
+  /**
+   * Which grid a placement lands in — a body you pointed at, or the yard.
+   *
+   * Returns null for a key that no longer names a body. Falling back to the yard
+   * would be silently catastrophic: a part aimed at a car would be created at
+   * the car's *local* cell coordinates in world space, i.e. somewhere near the
+   * origin, nowhere near where the player was looking. Bodies are destroyed and
+   * remade routinely (merges, splits), so a stale key is ordinary, not exotic.
+   */
   gridFor(targetKey) {
-    const rec = targetKey === null || targetKey === undefined ? null : this.bodies.get(targetKey);
-    return rec ? rec.bp : this.yard;
+    if (targetKey === null || targetKey === undefined) return this.yard;
+    return this.bodies.get(targetKey)?.bp ?? null;
   }
 
   canPlace(partId, cell, ori, targetKey = null) {
-    return this.gridFor(targetKey).canPlace(partId, cell, ori);
+    return this.gridFor(targetKey)?.canPlace(partId, cell, ori) ?? false;
   }
 
   place(partId, cell, ori, color, targetKey = null) {
     const bp = this.gridFor(targetKey);
+    if (!bp) return null;
     const rec = bp.add({ partId, cell, ori, color, id: this._nextPartId++ });
     if (!rec) { this._nextPartId--; return null; }
     this._insertPart(bp, rec.id);

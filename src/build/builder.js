@@ -25,6 +25,7 @@ const INSET = CELL * 0.25;
 // threshold would outline every facet of every bevel — a wireframe ball of
 // fluff. 30° keeps the silhouette and the panel lines and drops the rest.
 const outlineOf = (geo) => new THREE.EdgesGeometry(geo, 30);
+const ZERO = [0, 0, 0];
 
 /** The orientation whose local +Y points along a face normal — used by wheels. */
 function orientToFace(normal) {
@@ -180,9 +181,16 @@ export class Builder {
     const parent = frame ?? this.scene;
     if (this.ghost.parent !== parent) { parent.add(this.ghost); parent.add(this.edges); }
 
+    // Inside a body's group, positions are measured from the body's origin —
+    // the same offset every part mesh gets. Drawing the preview at the raw
+    // blueprint centre puts it a whole origin away from where the part will
+    // actually land, and since the origin is the centre of the build's bounding
+    // box, the error grows with the build: on a big one the ghost ends up
+    // somewhere else entirely on the map.
+    const o = target ? target.origin : ZERO;
     const [gx, gy, gz] = cellBoxCentre(cell, rs);
     const e = oriEuler(ori);
-    this.ghost.position.set(gx, gy, gz);
+    this.ghost.position.set(gx - o[0], gy - o[1], gz - o[2]);
     this.ghost.rotation.set(e.x, e.y, e.z, 'YXZ');
     this.ghost.material = valid ? ghostOk : ghostBlocked;
     this.ghost.visible = true;
