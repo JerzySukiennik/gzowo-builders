@@ -27,6 +27,7 @@ import { geometryFor } from '../render/geometry.js';
 import { materialFor } from '../render/materials.js';
 import { FILTER, FIXED_DT } from '../physics/world.js';
 import { Vehicle } from './vehicle.js';
+import { Mechanisms } from './mechanisms.js';
 
 const G = 9.81;
 /** The weakest link in the catalogue is one cell² of face. A blow that cannot
@@ -66,6 +67,7 @@ export class Construction {
     this.partBody = new Map();      // part id -> body key
     this.partCollider = new Map();  // part id -> Collider
     this.released = new Set();      // parts cut loose from the ground
+    this.mechanisms = new Mechanisms(this);
     this._nextKey = 1;
     this._nextPartId = 1;
     this.dirty = false;
@@ -156,19 +158,29 @@ export class Construction {
   toggleRelease(partId) {
     const rec = this.bodyOf(partId);
     if (!rec) return null;
+    // A machine with a mechanism in it is several bodies sharing one grid, and
+    // `G` has to move all of them or the joint will be tearing a fixed body
+    // against a falling one.
+    const family = [...this.bodies.values()].filter((r) => r.bp === rec.bp);
 
     if (rec.dynamic) {
-      for (const [id, part] of rec.bp.parts) {
+      const bp = rec.bp;
+      for (const part of bp.parts.values()) {
         if (!this.yard.canPlace(part.partId, part.cell, part.ori)) return 'blocked';
       }
-      this._resetToBlueprint(rec);
-      for (const [id, part] of rec.bp.parts) {
+      for (const r of family) this._resetToBlueprint(r);
+      for (const [id, part] of bp.parts) {
         this.yard.add({ id, partId: part.partId, cell: part.cell, ori: part.ori, color: part.color });
         this.released.delete(id);
       }
-      for (const key of rec.bp.broken) this.yard.broken.add(key);
-      rec.bp = this.yard;
-      this._refreshAnchor(rec);
+      for (const key of bp.broken) this.yard.broken.add(key);
+      // Back in the yard nothing articulates, so the machine becomes one body
+      // again: drop the pieces and re-form them from the yard.
+      const ids = [...bp.parts.keys()];
+      for (const r of family) this._destroyBody(r.key);
+      const first = ids.shift();
+      this._insertPart(this.yard, first);
+      for (const id of ids) this._insertPart(this.yard, id);
       this._relieveOverload();
       return 'anchored';
     }
@@ -176,6 +188,7 @@ export class Construction {
     rec.bp = this._carve(this.yard, rec.ids);
     for (const id of rec.ids) this.released.add(id);
     this._refreshAnchor(rec);
+    this._resplit(rec);        // a released machine comes apart at its mechanisms
     this.dirty = true;
     return 'released';
   }
@@ -210,9 +223,19 @@ export class Construction {
    * — can only be caused by removing a part or snapping a link, and even then
    * only within the one body affected.
    */
+  /**
+   * Neighbours that actually weld. In the yard a mechanism is just another
+   * bolted part — a construction on the lift is one solid piece while you build
+   * on it, exactly as it is in the workshop. The moment it is released the
+   * mechanism becomes a cut and a real joint takes over.
+   */
+  _weldNeighbours(bp, id) {
+    return bp === this.yard ? bp.neighbours(id) : bp.weldNeighbours(id);
+  }
+
   _insertPart(bp, id) {
     const keys = new Set();
-    for (const n of bp.neighbours(id)) {
+    for (const n of this._weldNeighbours(bp, id)) {
       const key = this.partBody.get(n.id);
       const rec = key === undefined ? null : this.bodies.get(key);
       if (rec && rec.bp === bp) keys.add(key);
@@ -226,6 +249,7 @@ export class Construction {
       if (!target || rec.ids.size > target.ids.size) target = rec;
     }
     this._attachPart(target, id);
+    this.mechanisms.markDirty();
     for (const key of keys) {
       if (key === target.key) continue;
       const other = this.bodies.get(key);
@@ -236,8 +260,8 @@ export class Construction {
     this.dirty = true;
   }
 
-  /** Has this body come apart? If so, leave the largest piece and rehome the rest. */
-  _resplit(rec) {
+  /** Split `rec.ids` by a chosen notion of connectivity. */
+  _split(rec, linksOf) {
     const groups = [];
     const seen = new Set();
     for (const start of rec.ids) {
@@ -247,14 +271,30 @@ export class Construction {
       seen.add(start);
       while (stack.length) {
         const cur = stack.pop();
-        for (const n of rec.bp.neighbours(cur)) {
+        for (const n of linksOf(cur)) {
           if (!rec.ids.has(n.id) || seen.has(n.id)) continue;
           seen.add(n.id); group.add(n.id); stack.push(n.id);
         }
       }
       groups.push(group);
     }
+    return groups;
+  }
+
+  /** Has this body come apart? If so, leave the largest piece and rehome the rest. */
+  _resplit(rec) {
+    const groups = this._split(rec, (id) => this._weldNeighbours(rec.bp, id));
     if (groups.length <= 1) { this._refreshAnchor(rec); this.dirty = true; return; }
+
+    // A body can come apart for two very different reasons, and they want
+    // different homes. A snapped weld makes a genuinely separate object, which
+    // needs a grid of its own. A mechanism cut makes another body of the *same*
+    // machine, which must keep sharing the grid it was designed in — that
+    // shared grid is what makes the assembly one thing to release, to re-anchor
+    // and to build on.
+    const assemblies = this._split(rec, (id) => rec.bp.neighbours(id));
+    const assemblyOf = new Map();
+    assemblies.forEach((set, i) => { for (const id of set) assemblyOf.set(id, i); });
 
     // One fragment keeps the yard and stays put; the rest are carved out and
     // fall. The keeper is whichever still reaches the meadow, or the largest.
@@ -270,9 +310,8 @@ export class Construction {
     }
     for (let i = 1; i < groups.length; i++) {
       for (const id of groups[i]) this._detachPart(rec, id);
-      // Every fragment gets a grid of its own — including fragments of the yard,
-      // which is what lets them stop being anchored and drop.
-      const bp = this._carve(rec.bp, groups[i]);
+      const sameMachine = assemblyOf.get([...groups[i]][0]) === assemblyOf.get([...groups[0]][0]);
+      const bp = sameMachine ? rec.bp : this._carve(rec.bp, groups[i]);
       this._createBody(bp, groups[i], motion);
     }
     this._refreshAnchor(rec);
@@ -408,6 +447,7 @@ export class Construction {
     this.bodies.set(rec.key, rec);
     for (const id of group) this._attachPart(rec, id);
     this._refreshVehicle(rec);
+    this.mechanisms.markDirty();
     return rec;
   }
 
@@ -460,6 +500,7 @@ export class Construction {
   _destroyBody(key) {
     const rec = this.bodies.get(key);
     if (!rec) return;
+    this.mechanisms.markDirty();
     rec.vehicle = null;
     for (const id of [...rec.ids]) this._detachPart(rec, id);
     this.world.removeRigidBody(rec.body);
@@ -584,11 +625,23 @@ export class Construction {
 
   // --- per-frame ------------------------------------------------------------
 
-  /** Wheels and drive, before the solver runs. */
+  /**
+   * Wheels, mechanisms and drive, before the solver runs.
+   *
+   * Input arrives keyed by the body the driver is sitting in, but a machine with
+   * a piston in it is several bodies. Resolving to the shared grid first means
+   * the whole machine hears one set of orders.
+   */
   beforeStep(controls) {
+    const byGrid = new Map();
     for (const rec of this.bodies.values()) {
-      if (rec.vehicle) rec.vehicle.step(controls.get(rec.key) ?? null);
+      const ctl = controls.get(rec.key);
+      if (ctl) byGrid.set(rec.bp, ctl);
     }
+    for (const rec of this.bodies.values()) {
+      if (rec.vehicle) rec.vehicle.step(byGrid.get(rec.bp) ?? null);
+    }
+    this.mechanisms.step(byGrid);
   }
 
   sync() {
@@ -601,10 +654,12 @@ export class Construction {
       }
       rec.vehicle?.syncVisuals();
     }
+    this.mechanisms.syncVisuals();
     this.dirty = false;
   }
 
   clear() {
+    this.mechanisms.clear();
     for (const key of [...this.bodies.keys()]) this._destroyBody(key);
     for (const id of [...this.meshes.keys()]) this._forgetMesh(id);
     this.released.clear();
@@ -616,7 +671,7 @@ export class Construction {
 function colliderDescFor(RAPIER, def) {
   const hx = def.size[0] * CELL / 2, hy = def.size[1] * CELL / 2, hz = def.size[2] * CELL / 2;
   if (def.shape === 'wheel') return RAPIER.ColliderDesc.cylinder(def.wheel.width / 2, def.wheel.radius);
-  if (def.shape === 'box' || def.shape === 'seat') return RAPIER.ColliderDesc.cuboid(hx, hy, hz);
+  if (def.shape !== 'wedge' && def.shape !== 'corner') return RAPIER.ColliderDesc.cuboid(hx, hy, hz);
 
   const pts = def.shape === 'wedge'
     ? [

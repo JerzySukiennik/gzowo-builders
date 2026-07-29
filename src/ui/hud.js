@@ -4,7 +4,7 @@
 // frame is a layout pass every frame, and on the target Intel MacBook that is
 // visible in the frame time.
 
-import { HOTBAR, PALETTE, PARTS } from '../shared/parts.js';
+import { HOTBAR_MAX, PALETTE, PARTS } from '../shared/parts.js';
 
 export class Hud {
   constructor() {
@@ -14,16 +14,13 @@ export class Hud {
     this.statusEl = document.getElementById('status');
     this._last = '';
 
-    this.slots = HOTBAR.map((id, i) => {
-      const def = PARTS[id];
+    this.slots = Array.from({ length: HOTBAR_MAX }, (_, i) => {
       const el = document.createElement('div');
       el.className = 'slot';
-      el.innerHTML = `<span class="key">${i + 1}</span>` +
-        `<svg class="icon" viewBox="0 0 24 24">${slotGlyph(def)}</svg>` +
-        `<span>${def.name.toUpperCase()}</span>`;
       this.hotbarEl.appendChild(el);
       return el;
     });
+    this._hotbarKey = '';
 
     this.swatches = PALETTE.map((hex) => {
       const el = document.createElement('div');
@@ -40,13 +37,26 @@ export class Hud {
   update(s, fps) {
     this.hotbarEl.style.opacity = s.driving ? '0.35' : '1';
     this.paletteEl.style.opacity = s.driving ? '0.35' : '1';
-    this.slots.forEach((el, i) => el.classList.toggle('on', !s.driving && HOTBAR[i] === s.partId));
+    const key = s.driving ? '' : s.hotbar.join(',');
+    if (key !== this._hotbarKey) {
+      this._hotbarKey = key;
+      this.slots.forEach((el, i) => {
+        const id = s.hotbar?.[i];
+        el.hidden = !id;
+        if (!id) return;
+        const def = PARTS[id];
+        el.innerHTML = `<span class="key">${i + 1}</span>` +
+          `<svg class="icon" viewBox="0 0 24 24">${slotGlyph(def)}</svg>` +
+          `<span>${def.name.toUpperCase()}</span>`;
+      });
+    }
+    this.slots.forEach((el, i) => el.classList.toggle('on', !s.driving && s.hotbar?.[i] === s.partId));
     this.swatches.forEach((el, i) => el.classList.toggle('on', !s.driving && i === s.color));
 
     const line = s.driving
       ? `<b>ZA KIEROWNICĄ</b>   ${s.speed} km/h   KOŁA ${s.wheels}   ` +
         `SILNIKI ${s.engines}   E — WYSIĄDŹ   ${fps} FPS`
-      : `<b>${s.paint ? 'MALOWANIE' : s.part.toUpperCase()}</b>   ` +
+      : `${s.categoryName}  <b>${s.paint ? 'MALOWANIE' : s.part.toUpperCase()}</b>   ` +
         (s.auto ? 'OBRÓT AUTO   ' : `OBRÓT ${s.yaw}°/${s.pitch}°   `) +
         `KOMÓRKA ${s.cell}   ` +
         `CZĘŚCI ${s.count}   BRYŁY ${s.bodies}   ` +
@@ -60,6 +70,11 @@ export class Hud {
 function slotGlyph(def) {
   const stroke = 'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"';
   if (def.shape === 'wedge') return `<path d="M3 19 L21 19 L3 6 Z" ${stroke}/>`;
+  if (def.shape === 'wheel') return `<circle cx="12" cy="12" r="8.5" ${stroke}/><circle cx="12" cy="12" r="3" ${stroke}/>`;
+  if (def.shape === 'piston') return `<rect x="6" y="12" width="12" height="8" rx="1.5" ${stroke}/><path d="M12 12 L12 4" ${stroke}/>`;
+  if (def.shape === 'hinge') return `<path d="M3 16 L21 16" ${stroke}/><circle cx="12" cy="10" r="4.5" ${stroke}/>`;
+  if (def.shape === 'bearing') return `<path d="M3 17 L21 17" ${stroke}/><circle cx="12" cy="10" r="5.5" ${stroke}/><circle cx="12" cy="10" r="2" ${stroke}/>`;
+  if (def.shape === 'seat') return `<path d="M5 20 L19 20 L19 15 L9 15 L9 5 L5 5 Z" ${stroke}/>`;
   if (def.shape === 'corner') return `<path d="M3 19 L21 19 L3 6 Z M21 19 L3 6" ${stroke}/>`;
   const [w, h] = [def.size[0], def.size[1]];
   const ar = w / Math.max(h, 0.5);

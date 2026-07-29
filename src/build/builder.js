@@ -8,7 +8,7 @@
 // the right of it.
 
 import * as THREE from 'three';
-import { PARTS, HOTBAR, PALETTE } from '../shared/parts.js';
+import { PARTS, HOTBARS, CATEGORY_ORDER, CATEGORY_NAME, PALETTE } from '../shared/parts.js';
 import { CELL, ORIENTATIONS, cellBoxCentre, makeOri, oriEuler, pitchOf, rotateSize, rotateVec, worldToCell, yawOf } from '../shared/grid.js';
 import { geometryFor } from '../render/geometry.js';
 import { ghostBlocked, ghostEdge, ghostOk } from '../render/materials.js';
@@ -47,6 +47,7 @@ export class Builder {
     this.camera = camera;
     this.worldTargets = worldTargets;  // ground + static props, for building on
 
+    this.categoryIndex = 0;
     this.partIndex = 0;
     this.color = 2;                    // signal yellow reads well against grass
     this.ori = 0;
@@ -75,11 +76,22 @@ export class Builder {
     this._origin = new THREE.Vector3();
   }
 
-  get partId() { return HOTBAR[this.partIndex]; }
+  get category() { return CATEGORY_ORDER[this.categoryIndex]; }
+  get hotbar() { return HOTBARS[this.category]; }
+  get partId() { return this.hotbar[Math.min(this.partIndex, this.hotbar.length - 1)]; }
   get part() { return PARTS[this.partId]; }
 
   selectPart(index) {
-    this.partIndex = ((index % HOTBAR.length) + HOTBAR.length) % HOTBAR.length;
+    const n = this.hotbar.length;
+    this.partIndex = ((index % n) + n) % n;
+    this._refreshGhostGeometry();
+  }
+
+  /** Tab walks the categories; the numbers stay meaningful inside one. */
+  cycleCategory(dir = 1) {
+    const n = CATEGORY_ORDER.length;
+    this.categoryIndex = ((this.categoryIndex + dir) % n + n) % n;
+    this.partIndex = Math.min(this.partIndex, this.hotbar.length - 1);
     this._refreshGhostGeometry();
   }
 
@@ -245,7 +257,10 @@ export class Builder {
     if (id === null || id === undefined) return;
     const rec = this.construction.recordOf(id);
     if (!rec) return;
-    const idx = HOTBAR.indexOf(rec.partId);
+    // The pipette may need to switch category as well as slot.
+    const cat = CATEGORY_ORDER.indexOf(PARTS[rec.partId].category);
+    if (cat >= 0) this.categoryIndex = cat;
+    const idx = this.hotbar.indexOf(rec.partId);
     if (idx >= 0) this.selectPart(idx);
     this.ori = rec.ori;
     this.color = rec.color;
@@ -274,6 +289,8 @@ export class Builder {
       paint: this.paintMode,
       auto: !!this.part.autoOrient,
       cell: cell ? `${cell[0]} ${cell[1]} ${cell[2]}` : '—',
+      categoryName: CATEGORY_NAME[this.category],
+      hotbar: this.hotbar,
       count: this.construction.count,
       bodies: this.construction.bodyCount,
       seatHere: !!this.seatUnderCursor(),

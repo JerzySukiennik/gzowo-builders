@@ -19,7 +19,8 @@ export class Input {
       if (e.repeat) return;
       this.keys.add(e.code);
       if (this.locked) this.events.push({ type: 'key', code: e.code });
-      if (this.locked && e.code === 'Space') e.preventDefault();
+      if (this.locked && (e.code === 'Space' || e.code === 'Tab'
+          || e.code.startsWith('Arrow'))) e.preventDefault();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.keys.clear());

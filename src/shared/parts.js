@@ -100,7 +100,7 @@ const PART_LIST = [
     size: [4, 2, 4],
     shape: 'wheel',
     model: 'assets/models/wheel.glb',
-    hotbar: 7,
+    hotbar: 1,
     autoOrient: true,          // the axle points out of the face you place it on
     wheel: {
       radius: 0.5,
@@ -119,12 +119,56 @@ const PART_LIST = [
     size: [4, 4, 4],
     shape: 'box',
     model: 'assets/models/engine_electric.glb',
-    hotbar: 8,
+    hotbar: 2,
     // Measured against a fifteen-block car (2.8 t): 9 kN is 3.2 m/s², which is
     // 0-40 km/h in about four seconds. One engine moves a small car properly,
     // two make it quick — which is the point of a light plastic density.
     engine: { force: 9000, topSpeed: 15 },
   },
+  // --- motion --------------------------------------------------------------
+  // Every mechanism turns or slides about **its mount normal**, which is its
+  // local +Y — the same convention as a wheel's axle. One rule for all three
+  // means the cursor can auto-orient them all the same way, and you never have
+  // to work out which way a part will move before you place it.
+  //
+  // A mechanism is a cut in the weld graph: the part itself belongs to the body
+  // it is bolted to, and whatever touches its far face becomes a separate body
+  // joined by a real Rapier joint. In the yard that cut is not made — a
+  // construction on the lift is one solid piece while you build on it.
+  {
+    id: 'piston',
+    name: 'Tłok',
+    category: CATEGORY.MOTION,
+    size: [4, 4, 4],
+    shape: 'piston',
+    model: 'assets/models/piston.glb',
+    hotbar: 1,
+    autoOrient: true,
+    mechanism: { kind: 'piston', travel: 0.75, force: 40000, speed: 1.1 },
+  },
+  {
+    id: 'hinge',
+    name: 'Zawias',
+    category: CATEGORY.MOTION,
+    size: [4, 2, 4],
+    shape: 'hinge',
+    model: 'assets/models/hinge.glb',
+    hotbar: 2,
+    autoOrient: true,
+    mechanism: { kind: 'hinge', limit: 2.36 },      // free swing, +-135 degrees
+  },
+  {
+    id: 'motor_rotary',
+    name: 'Obrotnica',
+    category: CATEGORY.MOTION,
+    size: [4, 2, 4],
+    shape: 'bearing',
+    model: 'assets/models/motor_rotary.glb',
+    hotbar: 3,
+    autoOrient: true,
+    mechanism: { kind: 'bearing', torque: 26000, speed: 2.6 },
+  },
+
   {
     id: 'seat',
     name: 'Siedzenie',
@@ -132,7 +176,7 @@ const PART_LIST = [
     size: [4, 4, 4],
     shape: 'seat',
     model: 'assets/models/seat.glb',
-    hotbar: 9,
+    hotbar: 3,
     seat: { eye: [0, 0.42, 0] },   // where the driver's head sits, in part space
   },
 ];
@@ -140,11 +184,26 @@ const PART_LIST = [
 export const PARTS = Object.fromEntries(PART_LIST.map((p) => [p.id, p]));
 export const PART_IDS = PART_LIST.map((p) => p.id);
 
-/** Hotbar order — index 0..n maps to keys 1..n. */
-export const HOTBAR = PART_LIST
-  .filter((p) => p.hotbar)
-  .sort((a, b) => a.hotbar - b.hotbar)
-  .map((p) => p.id);
+/**
+ * The hotbar is per category, because nine number keys stopped being enough at
+ * twelve parts and will be nowhere near enough after the logic gates. Tab walks
+ * the categories; the numbers stay meaningful inside one.
+ */
+export const CATEGORY_ORDER = [CATEGORY.STRUCTURE, CATEGORY.DRIVE, CATEGORY.MOTION];
+export const CATEGORY_NAME = {
+  [CATEGORY.STRUCTURE]: 'KONSTRUKCJA',
+  [CATEGORY.DRIVE]: 'NAPĘD',
+  [CATEGORY.MOTION]: 'MECHANIZMY',
+  [CATEGORY.LOGIC]: 'LOGIKA',
+};
+
+export const HOTBARS = Object.fromEntries(CATEGORY_ORDER.map((cat) => [cat,
+  PART_LIST.filter((p) => p.category === cat && p.hotbar)
+           .sort((a, b) => a.hotbar - b.hotbar)
+           .map((p) => p.id)]));
+
+/** Longest hotbar — how many number keys the UI has to offer. */
+export const HOTBAR_MAX = Math.max(...Object.values(HOTBARS).map((h) => h.length));
 
 /** Volume of a part in m³, accounting for shapes that are not a full box. */
 export function partVolume(part) {
@@ -153,6 +212,8 @@ export function partVolume(part) {
   if (part.shape === 'corner') return box / 6;
   if (part.shape === 'wheel') return Math.PI * part.wheel.radius ** 2 * part.wheel.width;
   if (part.shape === 'seat') return box * 0.45;
+  if (part.shape === 'piston') return box * 0.55;
+  if (part.shape === 'hinge' || part.shape === 'bearing') return box * 0.7;
   return box;
 }
 

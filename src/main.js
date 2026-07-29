@@ -13,7 +13,7 @@ import { Construction } from './build/construction.js';
 import { Builder } from './build/builder.js';
 import { Hud } from './ui/hud.js';
 import { loadPartModels } from './render/models.js';
-import { HOTBAR } from './shared/parts.js';
+import { HOTBAR_MAX } from './shared/parts.js';
 
 const gate = document.getElementById('gate');
 const gateBtn = document.getElementById('gate-btn');
@@ -28,7 +28,7 @@ boot().catch((err) => {
 
 async function boot() {
   const [{ RAPIER, world }, modelCount] = await Promise.all([initPhysics(), loadPartModels()]);
-  console.log(`[boot] modele części: ${modelCount}/${HOTBAR.length}`);
+  console.log(`[boot] modele części: ${modelCount}`);
 
   // --- renderer ------------------------------------------------------------
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -125,6 +125,11 @@ function driveControls(input, player) {
     throttle: (input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0),
     steer: (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0),
     brake: input.down('Space'),
+    // Mechanisms ride on the arrow keys until phase 5 gives them real wiring.
+    mech: {
+      extend: (input.down('ArrowUp') ? 1 : 0) - (input.down('ArrowDown') ? 1 : 0),
+      turn: (input.down('ArrowRight') ? 1 : 0) - (input.down('ArrowLeft') ? 1 : 0),
+    },
   });
   return m;
 }
@@ -155,9 +160,10 @@ function handleEvents(events, builder, player) {
       else if (e.code === 'KeyC') builder.paintMode = !builder.paintMode;
       else if (e.code === 'KeyG') builder.toggleRelease();
       else if (e.code === 'KeyE') enterOrLeaveSeat(player, builder);
+      else if (e.code === 'Tab') builder.cycleCategory(builder_shift() ? -1 : 1);
       else if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5));
-        if (n >= 1 && n <= HOTBAR.length) builder.selectPart(n - 1);
+        if (n >= 1 && n <= HOTBAR_MAX) builder.selectPart(n - 1);
       }
     }
   }

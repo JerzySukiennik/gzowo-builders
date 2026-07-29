@@ -35,9 +35,23 @@ export function geometryFor(part) {
     geo = new THREE.CylinderGeometry(part.wheel.radius, part.wheel.radius, part.wheel.width, 20);
   } else if (part.shape === 'seat') {
     geo = seatGeometry(w, h, d);
+  } else if (part.shape === 'piston') {
+    geo = pistonGeometry(w, h, d);
+  } else if (part.shape === 'hinge' || part.shape === 'bearing') {
+    geo = bearingGeometry(w, h, d, part.shape === 'bearing');
   } else geo = new RoundedBoxGeometry(w, h, d, 2, Math.min(BEVEL, Math.min(w, h, d) / 3));
   cache.set(part.id, geo);
   return geo;
+}
+
+/**
+ * Merge parts of a composite shape. RoundedBoxGeometry comes out non-indexed and
+ * CylinderGeometry indexed, and mergeGeometries silently returns null when the
+ * two are mixed — which then blows up inside three's Mesh constructor, a long
+ * way from the cause.
+ */
+function merge(parts) {
+  return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
 }
 
 function fromTriangles(tris) {
@@ -84,7 +98,33 @@ function seatGeometry(w, h, d) {
   base.translate(0, -h * 0.36, d * 0.1);
   const back = new RoundedBoxGeometry(w, h * 0.72, d * 0.22, 2, BEVEL);
   back.translate(0, h * 0.14, d * 0.39);
-  return mergeGeometries([base, back]);
+  return merge([base, back]);
+}
+
+/** Piston: a body with a rod out of its +Y face — the face it moves things on. */
+function pistonGeometry(w, h, d) {
+  const body = new RoundedBoxGeometry(w * 0.86, h * 0.62, d * 0.86, 2, BEVEL);
+  body.translate(0, -h * 0.19, 0);
+  const rod = new THREE.CylinderGeometry(w * 0.20, w * 0.20, h * 0.44, 14);
+  rod.translate(0, h * 0.28, 0);
+  const cap = new RoundedBoxGeometry(w * 0.72, h * 0.10, d * 0.72, 2, BEVEL);
+  cap.translate(0, h * 0.45, 0);
+  return merge([body, rod, cap]);
+}
+
+/** Hinge and rotary motor: a plate with a barrel turning about +Y. */
+function bearingGeometry(w, h, d, powered) {
+  const plate = new RoundedBoxGeometry(w, h * 0.44, d, 2, BEVEL);
+  plate.translate(0, -h * 0.28, 0);
+  const barrel = new THREE.CylinderGeometry(w * 0.34, w * 0.34, h * 0.56, 16);
+  barrel.translate(0, h * 0.22, 0);
+  const parts = [plate, barrel];
+  if (powered) {
+    const ring = new THREE.CylinderGeometry(w * 0.44, w * 0.44, h * 0.14, 16);
+    ring.translate(0, 0, 0);
+    parts.push(ring);
+  }
+  return merge(parts);
 }
 
 /** Half-extents, in metres, of a part's collider box in its local frame. */

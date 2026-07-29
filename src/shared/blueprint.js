@@ -10,15 +10,28 @@
 // the ids and cell boxes are computed here and nowhere else.
 
 import { JOINT_STRENGTH_PER_CELL, PARTS, partMass } from './parts.js';
-import { cellBoxCentre, cellKey, contactArea, forEachCell, rotateSize } from './grid.js';
+import { CELL, cellBoxCentre, cellKey, contactArea, forEachCell, rotateSize, rotateVec } from './grid.js';
 
 export const linkKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+const EMPTY = new Set();
+
+/** Does `other` sit against the face a mechanism moves — its local +Y side? */
+function onMovingFace(mech, other) {
+  if (!other) return false;
+  const d = rotateVec(mech.ori, 0, 1, 0);
+  const a = d.findIndex((v) => v !== 0);
+  if (a < 0) return false;
+  return d[a] > 0
+    ? other.cell[a] === mech.cell[a] + mech.rs[a]
+    : other.cell[a] + other.rs[a] === mech.cell[a];
+}
 
 export class Blueprint {
   constructor() {
     this.parts = new Map();       // id -> part record
     this.occupancy = new Map();   // "x,y,z" -> part id
     this.adj = new Map();         // id -> Map(other id -> contact area in cells²)
+    this.mech = new Map();        // mechanism part id -> Set(ids on its moving face)
     this.broken = new Set();      // link keys that have snapped and stay snapped
     this._nextId = 1;
   }
@@ -87,14 +100,61 @@ export class Blueprint {
     }
     this.adj.set(rec.id, mine);
     for (const [otherId, area] of mine) this.adj.get(otherId)?.set(rec.id, area);
+
+    // Work out which of these contacts are a mechanism's moving face. Doing it
+    // once at placement keeps it out of every later graph walk.
+    if (PARTS[rec.partId].mechanism) {
+      const moving = new Set();
+      for (const otherId of mine.keys()) {
+        if (onMovingFace(rec, this.parts.get(otherId))) moving.add(otherId);
+      }
+      this.mech.set(rec.id, moving);
+    }
+    for (const otherId of mine.keys()) {
+      const other = this.parts.get(otherId);
+      if (!PARTS[other.partId].mechanism) continue;
+      if (onMovingFace(other, rec)) this.mech.get(otherId)?.add(rec.id);
+    }
+  }
+
+  /** Parts a mechanism carries on its far face — the ones it has to move. */
+  movingSideOf(id) { return this.mech.get(id) ?? EMPTY; }
+
+  /** Is this link a mechanism's moving face, i.e. a cut rather than a weld? */
+  isMechLink(a, b) {
+    return !!(this.mech.get(a)?.has(b) || this.mech.get(b)?.has(a));
+  }
+
+  /**
+   * Neighbours through welds only. Body forming uses this on a released
+   * construction, so a piston really does split it in two; the yard uses plain
+   * neighbours, so a construction on the lift stays one solid piece while you
+   * build on it.
+   */
+  weldNeighbours(id) {
+    return this.neighbours(id).filter((n) => !this.isMechLink(id, n.id));
+  }
+
+  /** Where a mechanism's joint sits, in blueprint space: the centre of its far face. */
+  jointAnchor(id) {
+    const rec = this.parts.get(id);
+    const d = rotateVec(rec.ori, 0, 1, 0);
+    const a = d.findIndex((v) => v !== 0);
+    const c = cellBoxCentre(rec.cell, rec.rs);
+    c[a] += Math.sign(d[a]) * rec.rs[a] * CELL / 2;
+    return { point: c, axis: d };
   }
 
   remove(id) {
     const rec = this.parts.get(id);
     if (!rec) return null;
     forEachCell(rec.cell, rec.rs, (x, y, z) => { this.occupancy.delete(cellKey(x, y, z)); });
-    for (const otherId of this.adj.get(id)?.keys() ?? []) this.adj.get(otherId)?.delete(id);
+    for (const otherId of this.adj.get(id)?.keys() ?? []) {
+      this.adj.get(otherId)?.delete(id);
+      this.mech.get(otherId)?.delete(id);
+    }
     this.adj.delete(id);
+    this.mech.delete(id);
     this.parts.delete(id);
     // A broken link to a part that no longer exists would resurrect as a break
     // if that part id were ever reused; drop it with the part.
@@ -193,9 +253,15 @@ export class Blueprint {
 
     const GROUND = -1;
     const rootSet = new Set(roots);
+    // Since mechanisms split one construction across several bodies, a part's
+    // neighbours can now live in a body this search knows nothing about. Walking
+    // into one used to reach a node with no mass recorded and crash; the load
+    // path stops at the body boundary, which is also what is physically true —
+    // beyond it there is a joint, not a weld.
+    const inGroup = group instanceof Set ? group : new Set(ids);
     const linksOf = (u) => {
       if (u === GROUND) return roots.map((id) => ({ id }));
-      const out = this.neighbours(u);
+      const out = this.neighbours(u).filter((n) => inGroup.has(n.id));
       return rootSet.has(u) ? [...out, { id: GROUND }] : out;
     };
 
