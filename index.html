@@ -134,6 +134,24 @@
   .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--signal-deep); }
 
   #loading { font: 500 11px/1.6 var(--mono); letter-spacing: 0.14em; color: var(--ink-45); }
+
+  /* --- join: the only place the game asks you to type ---------------------- */
+  .join { margin-top: 26px; padding-top: 20px; border-top: 2px dashed var(--ink-15); }
+  .join-title {
+    font: 500 10px/1.6 var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-45); margin-bottom: 10px;
+  }
+  .join input {
+    display: block; width: 100%; box-sizing: border-box; margin-bottom: 6px;
+    font: 500 12px/1 var(--mono); color: var(--ink); background: var(--paper-2);
+    border: 2px solid var(--ink); border-radius: 2px; padding: 9px 10px;
+  }
+  .join input::placeholder { color: var(--ink-45); }
+  .btn.small { padding: 9px 18px; font-size: 11px; }
+  #join-state {
+    margin-top: 8px; min-height: 14px;
+    font: 500 10px/1.4 var(--mono); letter-spacing: 0.1em; color: var(--ink-70);
+  }
 </style>
 
 <div id="hud" hidden>
@@ -158,6 +176,13 @@
     <p id="gate-text">Buduj z klocków, testuj na miejscu, patrz jak się rozpada.</p>
     <div id="loading">ŁADOWANIE…</div>
     <div class="btn" id="gate-btn" hidden>Wejdź</div>
+    <div class="join">
+      <div class="join-title">Gra z innymi — wpisz adres hosta</div>
+      <input id="join-host" placeholder="np. 192.168.0.12:3000" spellcheck="false">
+      <input id="join-name" placeholder="twoje imię" spellcheck="false" maxlength="24">
+      <div class="btn small" id="join-btn">Dołącz</div>
+      <div id="join-state"></div>
+    </div>
   </div>
 </div>
 

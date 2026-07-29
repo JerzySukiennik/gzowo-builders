@@ -97,7 +97,7 @@ export class Logic {
    * changes — a few dozen segments, so redrawing beats tracking each one.
    */
   syncVisuals() {
-    if (!this.viewDirty) return;
+    if (!this.c.view || !this.viewDirty) return;
     this.viewDirty = false;
     const pts = [];
     const seen = new Set();
@@ -120,7 +120,7 @@ export class Logic {
       );
       this.wireView.frustumCulled = false;
       this.wireView.raycast = () => {};
-      this.c.root.parent.add(this.wireView);
+      this.c.view.addLoose(this.wireView);
     }
     this.wireView.geometry.dispose();
     this.wireView.geometry = new THREE.BufferGeometry();

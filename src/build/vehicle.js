@@ -244,6 +244,7 @@ export class Vehicle {
 
   /** Drop each wheel to where its suspension actually is, steer it, spin it. */
   syncVisuals() {
+    if (!this.c.view) return;
     for (const w of this.wheels) {
       const mesh = this.c.meshes.get(w.id);
       if (!mesh) continue;

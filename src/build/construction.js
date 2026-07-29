@@ -22,9 +22,9 @@
 import * as THREE from 'three';
 import { Blueprint, linkKey } from '../shared/blueprint.js';
 import { DENSITY, JOINT_STRENGTH_PER_CELL, PARTS } from '../shared/parts.js';
+
+const isPaintable = (partId) => PARTS[partId]?.paintable !== false;
 import { CELL, cellBoxCentre, oriEuler, rotateSize } from '../shared/grid.js';
-import { geometryFor, modelMaterialFor } from '../render/geometry.js';
-import { materialFor } from '../render/materials.js';
 import { FILTER, FIXED_DT } from '../physics/world.js';
 import { Vehicle } from './vehicle.js';
 import { Mechanisms } from './mechanisms.js';
@@ -55,16 +55,21 @@ const LEVER_SCALE = 0.5;
 const MAX_OVERLOAD_PASSES = 6;
 
 export class Construction {
-  constructor(scene, RAPIER, world) {
+  /**
+   * `view` is optional. With one, every part gets a mesh; without one, the same
+   * class runs headless — which is how the phase-7 server can be authoritative
+   * over exactly the code the client is looking at, rather than a reimplementation
+   * of it that drifts.
+   */
+  constructor(RAPIER, world, view = null) {
     this.RAPIER = RAPIER;
     this.world = world;
+    this.view = view;
     this.yard = new Blueprint();
 
-    this.root = new THREE.Group();
-    this.root.name = 'construction';
-    scene.add(this.root);
+    this.root = view ? view.root : null;
 
-    this.meshes = new Map();        // part id -> Mesh
+    this.meshes = view ? view.meshes : new Map();   // part id -> Mesh (client only)
     this.bodies = new Map();        // body key -> body record
     this.partBody = new Map();      // part id -> body key
     this.partCollider = new Map();  // part id -> Collider
@@ -74,6 +79,9 @@ export class Construction {
     this._nextKey = 1;
     this._nextPartId = 1;
     this.dirty = false;
+    // A guest never simulates a construction: bodies exist so you can aim at
+    // them, walk on them and sit in them, but the host says where they are.
+    this.remote = false;
   }
 
   get count() {
@@ -198,10 +206,9 @@ export class Construction {
 
   paint(id, color) {
     const rec = this.recordOf(id);
-    if (!rec || modelMaterialFor(rec.partId)) return false;
+    if (!rec || !this.view?.paintable(rec.partId, true)) return false;
     rec.color = color;
-    const mesh = this.meshes.get(id);
-    if (mesh) mesh.material = materialFor(color);
+    this.view?.paint(id, color);
     return true;
   }
 
@@ -403,7 +410,9 @@ export class Construction {
     if (anchored === !rec.dynamic) { this._refreshVehicle(rec); return; }
     const { RAPIER } = this;
     rec.dynamic = !anchored;
-    rec.body.setBodyType(anchored ? RAPIER.RigidBodyType.Fixed : RAPIER.RigidBodyType.Dynamic, true);
+    rec.body.setBodyType(anchored ? RAPIER.RigidBodyType.Fixed
+      : (this.remote ? RAPIER.RigidBodyType.KinematicPositionBased : RAPIER.RigidBodyType.Dynamic),
+      true);
     rec.prevVel = null;
     this._refreshVehicle(rec);
   }
@@ -495,16 +504,15 @@ export class Construction {
 
     const anchored = this._shouldAnchor(bp, group);
     const body = world.createRigidBody(
-      (anchored ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic())
+      (anchored ? RAPIER.RigidBodyDesc.fixed()
+        : (this.remote ? RAPIER.RigidBodyDesc.kinematicPositionBased()
+                       : RAPIER.RigidBodyDesc.dynamic()))
         .setTranslation(pos.x, pos.y, pos.z)
         .setRotation(rot),
     );
     if (!anchored && linvel) { body.setLinvel(linvel, true); body.setAngvel(angvel, true); }
 
-    const group3 = new THREE.Group();
-    group3.position.set(pos.x, pos.y, pos.z);
-    group3.quaternion.set(rot.x, rot.y, rot.z, rot.w);
-    this.root.add(group3);
+    const group3 = this.view ? this.view.makeGroup(pos, rot) : null;
 
     const rec = {
       key: this._nextKey++, bp, body, group: group3, ids: new Set(),
@@ -526,17 +534,7 @@ export class Construction {
     const e = oriEuler(part.ori);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(e.x, e.y, e.z, 'YXZ'));
 
-    let mesh = this.meshes.get(id);
-    if (!mesh) {
-      mesh = new THREE.Mesh(geometryFor(def), modelMaterialFor(def.id) ?? materialFor(part.color));
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.userData.partId = id;
-      this.meshes.set(id, mesh);
-    }
-    mesh.position.set(local[0], local[1], local[2]);
-    mesh.quaternion.copy(q);
-    rec.group.add(mesh);
+    this.view?.attach(rec.group, id, def, part, local, q);
 
     const col = world.createCollider(
       colliderDescFor(RAPIER, def)
@@ -557,8 +555,7 @@ export class Construction {
     if (!rec) return;
     const col = this.partCollider.get(id);
     if (col) { this.world.removeCollider(col, true); this.partCollider.delete(id); }
-    const mesh = this.meshes.get(id);
-    if (mesh && mesh.parent === rec.group) rec.group.remove(mesh);
+    this.view?.detach(rec.group, id);
     rec.ids.delete(id);
     if (this.partBody.get(id) === rec.key) this.partBody.delete(id);
   }
@@ -570,14 +567,11 @@ export class Construction {
     rec.vehicle = null;
     for (const id of [...rec.ids]) this._detachPart(rec, id);
     this.world.removeRigidBody(rec.body);
-    this.root.remove(rec.group);
+    this.view?.dropGroup(rec.group);
     this.bodies.delete(key);
   }
 
-  _forgetMesh(id) {
-    const mesh = this.meshes.get(id);
-    if (mesh) { mesh.parent?.remove(mesh); this.meshes.delete(id); }
-  }
+  _forgetMesh(id) { this.view?.forget(id); }
 
   // --- failure --------------------------------------------------------------
 
@@ -640,6 +634,7 @@ export class Construction {
    * is the signal: everything above what gravity alone explains is a blow.
    */
   afterStep() {
+    if (this.remote) return false;
     let broke = false;
     const touched = new Set();
     for (const rec of [...this.bodies.values()]) {
@@ -699,6 +694,7 @@ export class Construction {
    * the whole machine hears one set of orders.
    */
   beforeStep(controls) {
+    if (this.remote) return;      // the host drives; we only draw
     const byGrid = new Map();
     for (const rec of this.bodies.values()) {
       const ctl = controls.get(rec.key);
@@ -712,6 +708,7 @@ export class Construction {
   }
 
   sync() {
+    if (!this.view) return;
     for (const rec of this.bodies.values()) {
       if (rec.dynamic || this.dirty) {
         const t = rec.body.translation();
@@ -724,6 +721,36 @@ export class Construction {
     this.mechanisms.syncVisuals();
     this.logic.syncVisuals();
     this.dirty = false;
+  }
+
+  /** Put a grid the host sent us on the ground, bodies and all. */
+  adoptGrid(bp, isYard, released, pose) {
+    if (isYard) {
+      this.yard = bp;
+      for (const id of bp.parts.keys()) this._insertPart(bp, id);
+      return;
+    }
+    for (const id of released) this.released.add(id);
+    const ids = [...bp.parts.keys()];
+    for (const id of ids) this._insertPart(bp, id);
+    if (!pose) return;
+    for (const rec of this.bodies.values()) {
+      if (rec.bp !== bp) continue;
+      rec.body.setTranslation({ x: pose.t[0], y: pose.t[1], z: pose.t[2] }, true);
+      rec.body.setRotation({ x: pose.q[0], y: pose.q[1], z: pose.q[2], w: pose.q[3] }, true);
+    }
+    this.dirty = true;
+  }
+
+  /** Body transforms from the host. */
+  applyBodies(list) {
+    for (const [key, x, y, z, qx, qy, qz, qw] of list) {
+      const rec = this.bodies.get(key);
+      if (!rec || !rec.dynamic) continue;
+      rec.body.setNextKinematicTranslation({ x, y, z });
+      rec.body.setNextKinematicRotation({ x: qx, y: qy, z: qz, w: qw });
+    }
+    this.dirty = true;
   }
 
   clear() {

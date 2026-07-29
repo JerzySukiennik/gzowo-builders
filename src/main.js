@@ -10,9 +10,12 @@ import { buildMeadow } from './world/meadow.js';
 import { Input } from './core/input.js';
 import { Player } from './player/player.js';
 import { Construction } from './build/construction.js';
+import { ConstructionView } from './render/construction-view.js';
 import { Builder } from './build/builder.js';
 import { Hud } from './ui/hud.js';
 import { SLOTS_MAX } from './build/toolbars.js';
+import { Session } from './net/session.js';
+import { NetClient } from './net/client.js';
 import { loadPartModels } from './render/models.js';
 
 
@@ -50,13 +53,15 @@ async function boot() {
   const worldTargets = scene.children.filter((o) => o.isMesh);
 
   const player = new Player(RAPIER, world, [0, 2, 8]);
-  const construction = new Construction(scene, RAPIER, world);
+  const construction = new Construction(RAPIER, world, new ConstructionView(scene));
   const input = new Input(renderer.domElement);
-  const builder = new Builder(scene, construction, camera, worldTargets);
+  const session = new Session(construction);
+  const net = new NetClient(construction, session, scene);
+  const builder = new Builder(scene, construction, camera, worldTargets, session);
   const hud = new Hud();
 
   // Debug handle: the console is the only inspector this project has.
-  globalThis.GB = { THREE, scene, camera, renderer, world, RAPIER, player, construction, builder, input, hud };
+  globalThis.GB = { THREE, scene, camera, renderer, world, RAPIER, player, construction, builder, input, hud, session, net };
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
@@ -68,6 +73,18 @@ async function boot() {
   loadingEl.hidden = true;
   gateBtn.hidden = false;
   gateBtn.addEventListener('click', () => input.lock());
+
+  const joinBtn = document.getElementById('join-btn');
+  const joinHost = document.getElementById('join-host');
+  const joinName = document.getElementById('join-name');
+  const joinState = document.getElementById('join-state');
+  net.onStatus = (t) => { joinState.textContent = t; };
+  joinBtn.addEventListener('click', () => {
+    const host = joinHost.value.trim();
+    if (!host) return;
+    net.connect(host.includes(':') ? host : `${host}:3000`, joinName.value.trim() || 'gracz');
+  });
+  joinHost.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
   input.onLockChange = (locked) => {
     gate.classList.toggle('hidden', locked);
     if (locked) hud.show(); else hud.hide();
@@ -90,13 +107,15 @@ async function boot() {
       handleEvents(input.drain(), builder, player);
     }
 
+    const drive = driveControls(input, player);
     clock.advance(dt, () => {
       if (input.locked) player.step(input);
-      construction.beforeStep(driveControls(input, player));
+      construction.beforeStep(drive);
       world.step();
       construction.afterStep();
     });
     construction.sync();
+    net.report(player, drive.get(player.seat?.rec.key) ?? { throttle: 0, steer: 0, brake: false, mech: { extend: 0, turn: 0 } });
 
     player.applyToCamera(camera);
     // Keep the shadow frustum around the builder rather than the origin.
@@ -150,7 +169,7 @@ function interact(player, builder) {
   const seat = builder.seatUnderCursor();
   if (seat) { player.sit(seat); return; }
   const hit = builder.target?.hitPartId;
-  if (hit !== null && hit !== undefined) builder.construction.logic.interact(hit);
+  if (hit !== null && hit !== undefined) builder.session.interact(hit);
 }
 
 function handleEvents(events, builder, player) {

@@ -43,9 +43,10 @@ function orientToFace(normal) {
 }
 
 export class Builder {
-  constructor(scene, construction, camera, worldTargets) {
+  constructor(scene, construction, camera, worldTargets, session) {
     this.scene = scene;
     this.construction = construction;
+    this.session = session ?? construction;
     this.camera = camera;
     this.worldTargets = worldTargets;  // ground + static props, for building on
 
@@ -248,13 +249,13 @@ export class Builder {
     switch (this.slot.kind) {
       case SLOT.PART:
         if (this.target.valid) {
-          this.construction.place(this.partId, this.target.cell, this.target.ori,
-                                  this.color, this.target.targetKey);
+          this.session.place(this.partId, this.target.cell, this.target.ori,
+                             this.color, this.target.targetKey);
         }
         return null;
       case SLOT.PREFAB:
         if (this.target.valid) {
-          this.construction.stamp(this.slot.id, this.target.cell, this.color, this.target.targetKey);
+          this.session.stamp(this.slot.id, this.target.cell, this.color, this.target.targetKey);
         }
         return null;
       default:
@@ -268,13 +269,13 @@ export class Builder {
       return null;
     }
     switch (tool) {
-      case 'remove': this.construction.removeById(hit); return 'usunięto';
-      case 'paint': return this.construction.paint(hit, this.color) ? 'pomalowano' : 'nie do malowania';
+      case 'remove': this.session.remove(hit); return 'usunięto';
+      case 'paint': this.session.paint(hit, this.color); return 'pomalowano';
       case 'clone': this.pipette(); return 'skopiowano';
-      case 'release': return this.construction.toggleRelease(hit);
+      case 'release': return this.session.release(hit);
       case 'wire': {
         if (this.wireFrom === null) { this.wireFrom = hit; return 'wybierz cel'; }
-        const ok = this.construction.connect(this.wireFrom, hit);
+        const ok = this.session.connect(this.wireFrom, hit);
         this.wireFrom = null;
         return ok ? 'połączono' : 'nie da się połączyć';
       }
@@ -287,11 +288,11 @@ export class Builder {
     const hit = this.target?.hitPartId;
     if (hit === null || hit === undefined) return;
     if (this.slot.kind === SLOT.TOOL && this.slot.id === 'wire') {
-      this.construction.disconnectAll(hit);
+      this.session.disconnect(hit);
       this.wireFrom = null;
       return;
     }
-    this.construction.removeById(hit);
+    this.session.remove(hit);
   }
 
   /** `G`: cut the construction under the cursor loose, or put it back. */
