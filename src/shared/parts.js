@@ -20,9 +20,16 @@ export const CATEGORY = {
   LOGIC: 'logic',
 };
 
-/** Force, in newtons, a single cell² of joint face can carry before it snaps.
- *  Tuned in phase 2 against the ramps on the meadow. */
-export const JOINT_STRENGTH_PER_CELL = 2600;
+/**
+ * Force, in newtons, a single cell² of joint face can carry before it snaps.
+ *
+ * Calibrated in phase 2 against measured drops of a one-cubic-metre block
+ * (150 kg): the momentum it loses in a single step is 40 kN from one metre,
+ * 60 kN from two and 105 kN from six. At 4000 N per cell² a full block-to-block
+ * face carries 64 kN, so a construction survives a hop off a ramp, starts
+ * shedding parts around two metres, and comes apart properly from six.
+ */
+export const JOINT_STRENGTH_PER_CELL = 4000;
 
 const PART_LIST = [
   {

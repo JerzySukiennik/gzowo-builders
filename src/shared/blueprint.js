@@ -9,13 +9,17 @@
 // server (phase 7) mirrors it into Rapier bodies, and both stay in step because
 // the ids and cell boxes are computed here and nowhere else.
 
-import { PARTS } from './parts.js';
-import { cellKey, contactArea, forEachCell, rotateSize } from './grid.js';
+import { JOINT_STRENGTH_PER_CELL, PARTS, partMass } from './parts.js';
+import { cellBoxCentre, cellKey, contactArea, forEachCell, rotateSize } from './grid.js';
+
+export const linkKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
 export class Blueprint {
   constructor() {
     this.parts = new Map();       // id -> part record
     this.occupancy = new Map();   // "x,y,z" -> part id
+    this.adj = new Map();         // id -> Map(other id -> contact area in cells²)
+    this.broken = new Set();      // link keys that have snapped and stay snapped
     this._nextId = 1;
   }
 
@@ -48,38 +52,29 @@ export class Blueprint {
 
     this.parts.set(rec.id, rec);
     forEachCell(rec.cell, rs, (x, y, z) => { this.occupancy.set(cellKey(x, y, z), rec.id); });
+    this._wire(rec);
     return rec;
   }
 
-  remove(id) {
-    const rec = this.parts.get(id);
-    if (!rec) return null;
-    forEachCell(rec.cell, rec.rs, (x, y, z) => { this.occupancy.delete(cellKey(x, y, z)); });
-    this.parts.delete(id);
-    return rec;
-  }
-
-  partAtCell(x, y, z) {
-    const id = this.occupancy.get(cellKey(x, y, z));
-    return id === undefined ? null : this.parts.get(id);
-  }
-
-  /** Parts sharing a face with `id`, with the contact area in cells². */
-  neighbours(id) {
-    const rec = this.parts.get(id);
-    if (!rec) return [];
-    const seen = new Set();
-    const out = [];
-    // Walk the shell one cell outside the part's box and collect whatever is there.
+  /**
+   * Record this part's face contacts in the adjacency cache, both ways.
+   *
+   * The graph is walked several times per placement — components, bridges,
+   * overload — and finding a part's neighbours by probing its cell shell costs
+   * a hundred string keys every time. Computing it once when the part lands and
+   * reading it thereafter is the difference between a placement costing 28 ms
+   * on a 500-part build and costing under one.
+   */
+  _wire(rec) {
+    const mine = new Map();
     const [cx, cy, cz] = rec.cell;
     const [sx, sy, sz] = rec.rs;
     const probe = (x, y, z) => {
       const otherId = this.occupancy.get(cellKey(x, y, z));
-      if (otherId === undefined || otherId === id || seen.has(otherId)) return;
-      seen.add(otherId);
+      if (otherId === undefined || otherId === rec.id || mine.has(otherId)) return;
       const other = this.parts.get(otherId);
       const area = contactArea(rec.cell, rec.rs, other.cell, other.rs);
-      if (area > 0) out.push({ id: otherId, part: other, area });
+      if (area > 0) mine.set(otherId, area);
     };
     for (let i = 0; i < sx; i++) for (let j = 0; j < sy; j++) {
       probe(cx + i, cy + j, cz - 1); probe(cx + i, cy + j, cz + sz);
@@ -90,8 +85,66 @@ export class Blueprint {
     for (let j = 0; j < sy; j++) for (let k = 0; k < sz; k++) {
       probe(cx - 1, cy + j, cz + k); probe(cx + sx, cy + j, cz + k);
     }
+    this.adj.set(rec.id, mine);
+    for (const [otherId, area] of mine) this.adj.get(otherId)?.set(rec.id, area);
+  }
+
+  remove(id) {
+    const rec = this.parts.get(id);
+    if (!rec) return null;
+    forEachCell(rec.cell, rec.rs, (x, y, z) => { this.occupancy.delete(cellKey(x, y, z)); });
+    for (const otherId of this.adj.get(id)?.keys() ?? []) this.adj.get(otherId)?.delete(id);
+    this.adj.delete(id);
+    this.parts.delete(id);
+    // A broken link to a part that no longer exists would resurrect as a break
+    // if that part id were ever reused; drop it with the part.
+    for (const key of this.broken) {
+      const [a, b] = key.split('|');
+      if (+a === id || +b === id) this.broken.delete(key);
+    }
+    return rec;
+  }
+
+  mass(id) { return partMass(PARTS[this.parts.get(id).partId]); }
+
+  centre(id) {
+    const rec = this.parts.get(id);
+    return cellBoxCentre(rec.cell, rec.rs);
+  }
+
+  /** Force, in newtons, a link can carry before it snaps. */
+  linkStrength(a, b) { return this.linkArea(a, b) * JOINT_STRENGTH_PER_CELL; }
+
+  breakLink(a, b) {
+    const key = linkKey(a, b);
+    if (this.broken.has(key)) return false;
+    this.broken.add(key);
+    return true;
+  }
+
+  partAtCell(x, y, z) {
+    const id = this.occupancy.get(cellKey(x, y, z));
+    return id === undefined ? null : this.parts.get(id);
+  }
+
+  /** Parts still sharing a face with `id` — snapped links do not count. */
+  neighbours(id) {
+    const mine = this.adj.get(id);
+    if (!mine) return [];
+    const out = [];
+    // The string key is only built when something has actually snapped — on an
+    // undamaged build this loop does no allocation beyond the result itself,
+    // and it runs across every part several times per placement.
+    const anyBroken = this.broken.size > 0;
+    for (const [otherId, area] of mine) {
+      if (anyBroken && this.broken.has(linkKey(id, otherId))) continue;
+      out.push({ id: otherId, part: this.parts.get(otherId), area });
+    }
     return out;
   }
+
+  /** Contact area of a link, snapped or not. */
+  linkArea(a, b) { return this.adj.get(a)?.get(b) ?? 0; }
 
   /** Connected groups of parts — one group becomes one rigid body in phase 2. */
   components() {
@@ -116,12 +169,92 @@ export class Blueprint {
     return groups;
   }
 
+  /**
+   * Links that are the only thing holding part of the structure on, together
+   * with what hangs off them.
+   *
+   * This is Tarjan's bridge search rooted at the parts that reach the ground,
+   * so "the far side" always means "the side away from the anchor". One linear
+   * pass gives every load-bearing link and the mass and centre of mass it
+   * carries — which is exactly what the overload check needs, and why the
+   * check is affordable to run on every placement.
+   *
+   * The roots are tied together through a virtual node, because **the ground is
+   * itself a structural member**. Without it, a row of blocks lying flat on the
+   * meadow reads as a chain of cantilevers hanging off whichever block the
+   * search happened to start at, and the whole row snaps the moment it is long
+   * enough — every link in a chain is a bridge.
+   *
+   * Returns [{ a, b, mass, centre }] where `a` is the anchor-side part.
+   */
+  loadBearingLinks(group, roots) {
+    const ids = [...group];
+    if (!ids.length || !roots.length) return [];
+
+    const GROUND = -1;
+    const rootSet = new Set(roots);
+    const linksOf = (u) => {
+      if (u === GROUND) return roots.map((id) => ({ id }));
+      const out = this.neighbours(u);
+      return rootSet.has(u) ? [...out, { id: GROUND }] : out;
+    };
+
+    const disc = new Map(), low = new Map(), parentOf = new Map();
+    const subMass = new Map(), subMoment = new Map();
+    const out = [];
+    let timer = 0;
+
+    for (const id of ids) { subMass.set(id, this.mass(id)); const c = this.centre(id);
+      subMoment.set(id, [c[0] * subMass.get(id), c[1] * subMass.get(id), c[2] * subMass.get(id)]); }
+    subMass.set(GROUND, 0);
+    subMoment.set(GROUND, [0, 0, 0]);
+
+    // Iterative DFS: a deep lattice would blow the stack on the recursive form.
+    const NONE = -2;
+    const stack = [{ u: GROUND, it: linksOf(GROUND)[Symbol.iterator](), parent: NONE }];
+    disc.set(GROUND, timer); low.set(GROUND, timer); timer++;
+    parentOf.set(GROUND, NONE);
+
+    while (stack.length) {
+      const frame = stack[stack.length - 1];
+      const step = frame.it.next();
+      if (step.done) {
+        stack.pop();
+        const u = frame.u, p = frame.parent;
+        if (p !== NONE) {
+          low.set(p, Math.min(low.get(p), low.get(u)));
+          subMass.set(p, subMass.get(p) + subMass.get(u));
+          const mp = subMoment.get(p), mu = subMoment.get(u);
+          subMoment.set(p, [mp[0] + mu[0], mp[1] + mu[1], mp[2] + mu[2]]);
+          // A bridge out of the virtual ground node just means "this part rests
+          // on the meadow", which is not a link that can snap.
+          if (p !== GROUND && low.get(u) > disc.get(p)) {
+            const m = subMass.get(u), mom = subMoment.get(u);
+            if (m > 0) out.push({ a: p, b: u, mass: m, centre: [mom[0] / m, mom[1] / m, mom[2] / m] });
+          }
+        }
+        continue;
+      }
+      const v = step.value.id;
+      if (v === frame.parent) continue;
+      if (disc.has(v)) {
+        low.set(frame.u, Math.min(low.get(frame.u), disc.get(v)));
+        continue;
+      }
+      disc.set(v, timer); low.set(v, timer); timer++;
+      parentOf.set(v, frame.u);
+      stack.push({ u: v, it: linksOf(v)[Symbol.iterator](), parent: frame.u });
+    }
+    return out;
+  }
+
   /** Serialise for Firebase / the wire. Cell boxes are recomputed on load. */
   toJSON() {
     return {
       parts: [...this.parts.values()].map((p) => ({
         i: p.id, t: p.partId, c: p.cell, o: p.ori, k: p.color,
       })),
+      broken: [...this.broken],
     };
   }
 
@@ -130,6 +263,7 @@ export class Blueprint {
     for (const p of data?.parts ?? []) {
       bp.add({ id: p.i, partId: p.t, cell: p.c, ori: p.o, color: p.k });
     }
+    for (const k of data?.broken ?? []) bp.broken.add(k);
     return bp;
   }
 }

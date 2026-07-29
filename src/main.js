@@ -92,7 +92,9 @@ async function boot() {
     clock.advance(dt, () => {
       if (input.locked) player.step(input);
       world.step();
+      construction.afterStep();
     });
+    construction.sync();
 
     player.applyToCamera(camera);
     // Keep the shadow frustum around the builder rather than the origin.
@@ -122,6 +124,7 @@ function handleEvents(events, builder) {
     } else if (e.type === 'key') {
       if (e.code === 'KeyR') builder.rotate(builder_shift());
       else if (e.code === 'KeyC') builder.paintMode = !builder.paintMode;
+      else if (e.code === 'KeyG') builder.toggleRelease();
       else if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5));
         if (n >= 1 && n <= HOTBAR.length) builder.selectPart(n - 1);

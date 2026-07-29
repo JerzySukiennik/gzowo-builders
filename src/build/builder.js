@@ -135,8 +135,13 @@ export class Builder {
       }
     }
 
-    const valid = this.construction.canPlace(this.partId, cell, this.ori);
-    this.target = { cell, valid, hitPartId, normal: [...n] };
+    // A construction that has been released has moved: its blueprint cells no
+    // longer describe where it is in the world, so a part placed "on" it would
+    // appear somewhere else entirely. Building is only allowed against the
+    // world and against anchored constructions.
+    const onLoose = hitPartId !== null && !this.construction.isAnchored(hitPartId);
+    const valid = !onLoose && this.construction.canPlace(this.partId, cell, this.ori);
+    this.target = { cell, valid, hitPartId, onLoose, normal: [...n] };
 
     if (this.paintMode) {
       this.ghost.visible = false;
@@ -172,6 +177,13 @@ export class Builder {
     }
   }
 
+  /** `G`: cut the construction under the cursor loose, or put it back. */
+  toggleRelease() {
+    const id = this.target?.hitPartId;
+    if (id === null || id === undefined) return null;
+    return this.construction.toggleRelease(id);
+  }
+
   /** Middle click: adopt the part type, orientation and colour under the cursor. */
   pipette() {
     const id = this.target?.hitPartId;
@@ -196,6 +208,8 @@ export class Builder {
       paint: this.paintMode,
       cell: cell ? `${cell[0]} ${cell[1]} ${cell[2]}` : '—',
       count: this.construction.count,
+      bodies: this.construction.bodyCount,
+      loose: !!this.target?.onLoose,
       cellSize: CELL,
     };
   }

@@ -45,7 +45,9 @@ export class Hud {
       `<b>${s.paint ? 'MALOWANIE' : s.part.toUpperCase()}</b>   ` +
       `OBRÓT ${s.yaw}°/${s.pitch}°   ` +
       `KOMÓRKA ${s.cell}   ` +
-      `CZĘŚCI ${s.count}   ${fps} FPS`;
+      `CZĘŚCI ${s.count}   BRYŁY ${s.bodies}   ` +
+      (s.loose ? '<b>LUŹNA — NIE DOBUDUJESZ</b>   ' : '') +
+      `${fps} FPS`;
     if (line !== this._last) { this.statusEl.innerHTML = line; this._last = line; }
   }
 }

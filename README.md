@@ -23,6 +23,7 @@ modules. Serwer multiplayer (`npm start`) dochodzi w fazie 7.
 | `R` / `SHIFT+R` | obrót w poziomie / położenie na bok |
 | `1`–`6`, `SCROLL` | wybór części |
 | `C` | tryb malowania (wtedy `SCROLL` zmienia kolor) |
+| `G` | puść konstrukcję / cofnij ją na kotwicę |
 | `ESC` | pauza |
 
 ## Stan
@@ -30,7 +31,9 @@ modules. Serwer multiplayer (`npm start`) dochodzi w fazie 7.
 - **Faza 1 — gotowa.** Chodzenie FPP, siatka 0.25 m, snapping, sześć części
   strukturalnych, malowanie, płaska łąka z rampami testowymi. Wszystko, co
   postawisz, ma kolider — można po tym chodzić.
-- Faza 2 — fizyka: bryły dynamiczne, złącza, integralność strukturalna.
+- **Faza 2 — gotowa.** Jedna bryła sztywna na spójną konstrukcję, kotwiczenie do
+  ziemi, `G` = puść/cofnij, integralność strukturalna: przeciążone wsporniki
+  urywają się same, a uderzenia odrywają to, czego złącze nie utrzymało.
 - Faza 3 — pojazdy: koła, zawieszenie, silniki, siedzenie.
 - Fazy 4–9 — mechanizmy, logika, pełna łąka, multiplayer, zapis, dopieszczanie.
 
