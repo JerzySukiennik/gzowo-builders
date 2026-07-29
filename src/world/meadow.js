@@ -13,12 +13,44 @@ export const GROUND_SIZE = 220;
 const GRASS = 0x7fb347;
 const GRASS_DARK = 0x6ba03c;
 
-export function buildMeadow(scene, RAPIER, world) {
+/**
+ * A two-stop sky-and-grass gradient, blurred into an environment map.
+ *
+ * Without one, every metal in the game renders black: a metallic surface has no
+ * diffuse colour of its own, so with nothing to reflect there is nothing to see.
+ * Chrome piston rods and steel plates came out as dark holes until this existed.
+ * Eight pixels wide is plenty — it is reflection, not scenery.
+ */
+function skyEnvironment(renderer) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 8; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 128);
+  g.addColorStop(0.00, '#b7dcf5');
+  g.addColorStop(0.46, '#e8f2fa');
+  g.addColorStop(0.54, '#86a761');
+  g.addColorStop(1.00, '#3f5329');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const env = pmrem.fromEquirectangular(tex).texture;
+  pmrem.dispose();
+  tex.dispose();
+  return env;
+}
+
+export function buildMeadow(scene, RAPIER, world, renderer) {
   scene.background = new THREE.Color(0x8fc7e8);
   scene.fog = new THREE.Fog(0x8fc7e8, 90, 200);
+  scene.environment = skyEnvironment(renderer);
 
   // --- light: one hard sun for chunky shadows, sky bounce for the rest ------
-  const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x6e8f47, 0.62);
+  // The environment map now carries most of the ambient, so the fill drops.
+  const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x6e8f47, 0.30);
   scene.add(hemi);
 
   const sun = new THREE.DirectionalLight(0xfff4dd, 1.45);

@@ -16,12 +16,25 @@ import { CELL } from '../shared/grid.js';
 const BEVEL = 0.02;
 const cache = new Map();
 const modelled = new Map();
+const modelledMaterial = new Map();
 
 /** A Blender model has landed for this part — it wins over the placeholder. */
-export function registerModel(partId, geometry) {
+export function registerModel(partId, geometry, material = null) {
   modelled.set(partId, geometry);
+  if (material) modelledMaterial.set(partId, material);
   cache.delete(partId);
 }
+
+/**
+ * The material a part came with, or null if it is painted.
+ *
+ * Structural parts export with no material at all and wear the player's colour.
+ * Machines export with theirs — rubber, steel, chrome, copper, cast iron — so a
+ * wheel is a wheel rather than a wheel-shaped lump of whatever the palette was
+ * set to. That is the whole distinction: **you paint what you build with, not
+ * what you build from.**
+ */
+export const modelMaterialFor = (partId) => modelledMaterial.get(partId) ?? null;
 
 /** Cached geometry for a part definition, centred on its own origin. */
 export function geometryFor(part) {

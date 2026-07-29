@@ -23,7 +23,7 @@ import * as THREE from 'three';
 import { Blueprint, linkKey } from '../shared/blueprint.js';
 import { DENSITY, JOINT_STRENGTH_PER_CELL, PARTS } from '../shared/parts.js';
 import { CELL, cellBoxCentre, oriEuler } from '../shared/grid.js';
-import { geometryFor } from '../render/geometry.js';
+import { geometryFor, modelMaterialFor } from '../render/geometry.js';
 import { materialFor } from '../render/materials.js';
 import { FILTER, FIXED_DT } from '../physics/world.js';
 import { Vehicle } from './vehicle.js';
@@ -136,12 +136,14 @@ export class Construction {
     return rec;
   }
 
+  /** Paint a part — if it is the kind of part that takes paint at all. */
   paint(id, color) {
     const rec = this.recordOf(id);
-    if (!rec) return;
+    if (!rec || modelMaterialFor(rec.partId)) return false;
     rec.color = color;
     const mesh = this.meshes.get(id);
     if (mesh) mesh.material = materialFor(color);
+    return true;
   }
 
   idOfObject(obj) { return obj?.userData?.partId ?? null; }
@@ -462,7 +464,7 @@ export class Construction {
 
     let mesh = this.meshes.get(id);
     if (!mesh) {
-      mesh = new THREE.Mesh(geometryFor(def), materialFor(part.color));
+      mesh = new THREE.Mesh(geometryFor(def), modelMaterialFor(def.id) ?? materialFor(part.color));
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.userData.partId = id;

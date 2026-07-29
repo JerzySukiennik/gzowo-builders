@@ -6,6 +6,6 @@
   "type": "module",
   "scripts": {
     "start": "node server/server.js",
-    "serve": "python3 -m http.server 8290"
+    "serve": "python3 serve.py 8290"
   }
 }

@@ -61,6 +61,7 @@ export class Hud {
         `KOMÓRKA ${s.cell}   ` +
         `CZĘŚCI ${s.count}   BRYŁY ${s.bodies}   ` +
         (s.seatHere ? '<b>E — WSIĄDŹ</b>   ' : '') +
+        (s.unpaintable ? '<b>TEJ CZĘŚCI SIĘ NIE MALUJE</b>   ' : '') +
         `${fps} FPS`;
     if (line !== this._last) { this.statusEl.innerHTML = line; this._last = line; }
   }

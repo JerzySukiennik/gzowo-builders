@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 import { PARTS } from '../shared/parts.js';
 import { materialFor } from '../render/materials.js';
+import { modelMaterialFor } from '../render/geometry.js';
 
 /** A unit cylinder, scaled each frame to bridge whatever the piston has opened. */
 const ROD = new THREE.CylinderGeometry(0.12, 0.12, 1, 12);
@@ -101,7 +102,11 @@ export class Mechanisms {
       // inside. Extended, the part it carries walks away and leaves a hole, so
       // the exposed length of rod is drawn as its own mesh between the two
       // bodies. Cheaper and more honest than trying to stretch a baked mesh.
-      m.rod = new THREE.Mesh(ROD, materialFor(rec.bp.parts.get(id).color));
+      // The rod belongs to the piston, so it wears the piston's own steel —
+      // the chrome slug in the model, whose material slot is the last one.
+      const own = modelMaterialFor(rec.bp.parts.get(id).partId);
+      const chrome = Array.isArray(own) ? own[own.length - 1] : own;
+      m.rod = new THREE.Mesh(ROD, chrome ?? materialFor(rec.bp.parts.get(id).color));
       m.rod.castShadow = true;
       m.rod.visible = false;
       this.c.root.add(m.rod);

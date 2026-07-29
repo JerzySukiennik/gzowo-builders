@@ -13,6 +13,17 @@ import { CELL } from './grid.js';
 
 export const DENSITY = 150;
 
+/**
+ * You paint what you build *with*, not what you build *from*.
+ *
+ * Structural parts carry no material of their own and wear the player's colour.
+ * Machines ship with theirs — rubber, steel, chrome, copper, cast iron — because
+ * a wheel painted signal yellow stops reading as a wheel, and because the whole
+ * point of a machine part is that you recognise it at a glance in a pile of
+ * blocks. `paintable: false` says so; the loader only keeps a model's materials
+ * for those parts.
+ */
+
 export const CATEGORY = {
   STRUCTURE: 'structure',
   DRIVE: 'drive',
@@ -95,6 +106,7 @@ const PART_LIST = [
   // corrective rotations anywhere.
   {
     id: 'wheel',
+    paintable: false,
     name: 'Koło',
     category: CATEGORY.DRIVE,
     size: [4, 2, 4],
@@ -114,6 +126,7 @@ const PART_LIST = [
   },
   {
     id: 'engine_electric',
+    paintable: false,
     name: 'Silnik el.',
     category: CATEGORY.DRIVE,
     size: [4, 4, 4],
@@ -137,6 +150,7 @@ const PART_LIST = [
   // construction on the lift is one solid piece while you build on it.
   {
     id: 'piston',
+    paintable: false,
     name: 'Tłok',
     category: CATEGORY.MOTION,
     size: [4, 4, 4],
@@ -148,6 +162,7 @@ const PART_LIST = [
   },
   {
     id: 'hinge',
+    paintable: false,
     name: 'Zawias',
     category: CATEGORY.MOTION,
     size: [4, 2, 4],
@@ -159,6 +174,7 @@ const PART_LIST = [
   },
   {
     id: 'motor_rotary',
+    paintable: false,
     name: 'Obrotnica',
     category: CATEGORY.MOTION,
     size: [4, 2, 4],
@@ -171,6 +187,7 @@ const PART_LIST = [
 
   {
     id: 'seat',
+    paintable: false,
     name: 'Siedzenie',
     category: CATEGORY.DRIVE,
     size: [4, 4, 4],

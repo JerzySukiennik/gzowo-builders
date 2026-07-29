@@ -294,6 +294,9 @@ export class Builder {
       count: this.construction.count,
       bodies: this.construction.bodyCount,
       seatHere: !!this.seatUnderCursor(),
+      unpaintable: this.paintMode && this.target?.hitPartId !== null
+        && this.target?.hitPartId !== undefined
+        && PARTS[this.construction.recordOf(this.target.hitPartId)?.partId]?.paintable === false,
       cellSize: CELL,
     };
   }
