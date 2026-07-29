@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { PARTS, HOTBAR, PALETTE } from '../shared/parts.js';
-import { CELL, cellBoxCentre, makeOri, oriEuler, pitchOf, rotateSize, worldToCell, yawOf } from '../shared/grid.js';
+import { CELL, ORIENTATIONS, cellBoxCentre, makeOri, oriEuler, pitchOf, rotateSize, rotateVec, worldToCell, yawOf } from '../shared/grid.js';
 import { geometryFor } from '../render/geometry.js';
 import { ghostBlocked, ghostEdge, ghostOk } from '../render/materials.js';
 
@@ -25,6 +25,19 @@ const INSET = CELL * 0.25;
 // threshold would outline every facet of every bevel — a wireframe ball of
 // fluff. 30° keeps the silhouette and the panel lines and drops the rest.
 const outlineOf = (geo) => new THREE.EdgesGeometry(geo, 30);
+
+/** The orientation whose local +Y points along a face normal — used by wheels. */
+function orientToFace(normal) {
+  const n = [normal.x, normal.y, normal.z];
+  const axis = n.map(Math.abs).indexOf(Math.max(...n.map(Math.abs)));
+  const want = [0, 0, 0];
+  want[axis] = Math.sign(n[axis]) || 1;
+  for (let ori = 0; ori < ORIENTATIONS; ori++) {
+    const v = rotateVec(ori, 0, 1, 0);
+    if (v[0] === want[0] && v[1] === want[1] && v[2] === want[2]) return ori;
+  }
+  return 0;
+}
 
 export class Builder {
   constructor(scene, construction, camera, worldTargets) {
@@ -57,6 +70,7 @@ export class Builder {
     this._dir = new THREE.Vector3();
     this._normal = new THREE.Vector3();
     this._normalMat = new THREE.Matrix3();
+    this._invQ = new THREE.Quaternion();
   }
 
   get partId() { return HOTBAR[this.partIndex]; }
@@ -105,11 +119,24 @@ export class Builder {
       return;
     }
 
+    const hitPartId = this.construction.idOfObject(hit.object);
+    // Every construction has its own grid, so the whole cell calculation happens
+    // in the frame of whatever you are pointing at. On the ground that frame is
+    // the world; on a car it is the car, which is why you can build on one while
+    // it is parked at an angle halfway across the meadow.
+    const target = hitPartId === null ? null : this.construction.bodyOf(hitPartId);
+    const frame = target ? target.group : null;
+
     this._normalMat.getNormalMatrix(hit.object.matrixWorld);
     this._normal.copy(hit.face.normal).applyMatrix3(this._normalMat).normalize();
+    const point = hit.point.clone();
+    if (frame) {
+      frame.worldToLocal(point);
+      this._normal.applyQuaternion(this._invQ.copy(frame.quaternion).invert());
+    }
+    this._normal.normalize();
 
-    const hitPartId = this.construction.idOfObject(hit.object);
-    const inside = hit.point.clone().addScaledVector(this._normal, -INSET);
+    const inside = point.addScaledVector(this._normal, -INSET);
     const surfaceCell = worldToCell(inside.x, inside.y, inside.z);
 
     // Step one cell out along the dominant component of the face normal.
@@ -123,8 +150,12 @@ export class Builder {
     // building against (or on the world origin, on bare ground). Pointing
     // anywhere inside a tile places there, so a wall of panels comes out flush
     // without pixel-hunting, and you can still step a whole part sideways.
-    const hitRec = hitPartId === null ? null : this.construction.blueprint.parts.get(hitPartId);
-    const rs = rotateSize(this.ori, this.part.size);
+    const hitRec = target ? target.bp.parts.get(hitPartId) : null;
+    // A wheel is useless pointing the wrong way, so drive parts turn themselves
+    // to the face you stick them on rather than making you cycle R until the
+    // axle happens to line up.
+    const ori = this.part.autoOrient ? orientToFace(this._normal) : this.ori;
+    const rs = rotateSize(ori, this.part.size);
     const cell = [...anchor];
     for (let a = 0; a < 3; a++) {
       if (a === axis) {
@@ -135,13 +166,9 @@ export class Builder {
       }
     }
 
-    // A construction that has been released has moved: its blueprint cells no
-    // longer describe where it is in the world, so a part placed "on" it would
-    // appear somewhere else entirely. Building is only allowed against the
-    // world and against anchored constructions.
-    const onLoose = hitPartId !== null && !this.construction.isAnchored(hitPartId);
-    const valid = !onLoose && this.construction.canPlace(this.partId, cell, this.ori);
-    this.target = { cell, valid, hitPartId, onLoose, normal: [...n] };
+    const targetKey = target ? target.key : null;
+    const valid = this.construction.canPlace(this.partId, cell, ori, targetKey);
+    this.target = { cell, ori, valid, hitPartId, targetKey, normal: [...n] };
 
     if (this.paintMode) {
       this.ghost.visible = false;
@@ -149,8 +176,12 @@ export class Builder {
       return;
     }
 
+    // The preview lives in the same frame as the placement will.
+    const parent = frame ?? this.scene;
+    if (this.ghost.parent !== parent) { parent.add(this.ghost); parent.add(this.edges); }
+
     const [gx, gy, gz] = cellBoxCentre(cell, rs);
-    const e = oriEuler(this.ori);
+    const e = oriEuler(ori);
     this.ghost.position.set(gx, gy, gz);
     this.ghost.rotation.set(e.x, e.y, e.z, 'YXZ');
     this.ghost.material = valid ? ghostOk : ghostBlocked;
@@ -160,6 +191,15 @@ export class Builder {
     this.edges.visible = valid;
   }
 
+  /** A seat under the cursor you could get into. */
+  seatUnderCursor() {
+    const id = this.target?.hitPartId;
+    if (id === null || id === undefined) return null;
+    const rec = this.construction.bodyOf(id);
+    if (!rec?.vehicle) return null;
+    return rec.vehicle.seats.some((s) => s.id === id) ? { rec, seatId: id } : null;
+  }
+
   primary() {
     if (!this.target) return;
     if (this.paintMode) {
@@ -167,7 +207,8 @@ export class Builder {
       return;
     }
     if (this.target.valid) {
-      this.construction.place(this.partId, this.target.cell, this.ori, this.color);
+      this.construction.place(
+        this.partId, this.target.cell, this.target.ori, this.color, this.target.targetKey);
     }
   }
 
@@ -188,7 +229,7 @@ export class Builder {
   pipette() {
     const id = this.target?.hitPartId;
     if (id === null || id === undefined) return;
-    const rec = this.construction.blueprint.parts.get(id);
+    const rec = this.construction.recordOf(id);
     if (!rec) return;
     const idx = HOTBAR.indexOf(rec.partId);
     if (idx >= 0) this.selectPart(idx);
@@ -197,7 +238,18 @@ export class Builder {
   }
 
   /** One line of state for the HUD. */
-  status() {
+  status(player = null) {
+    const seat = player?.seat ?? null;
+    if (seat) {
+      const v = seat.rec.vehicle;
+      const lv = seat.rec.body.linvel();
+      return {
+        driving: true,
+        speed: Math.round(Math.hypot(lv.x, lv.y, lv.z) * 3.6),
+        wheels: v?.wheels.length ?? 0,
+        engines: v ? Math.round(v.engineForce / 1000) : 0,
+      };
+    }
     const cell = this.target?.cell;
     return {
       part: this.part.name,
@@ -206,10 +258,11 @@ export class Builder {
       yaw: yawOf(this.ori) * 90,
       pitch: pitchOf(this.ori) * 90,
       paint: this.paintMode,
+      auto: !!this.part.autoOrient,
       cell: cell ? `${cell[0]} ${cell[1]} ${cell[2]}` : '—',
       count: this.construction.count,
       bodies: this.construction.bodyCount,
-      loose: !!this.target?.onLoose,
+      seatHere: !!this.seatUnderCursor(),
       cellSize: CELL,
     };
   }

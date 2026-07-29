@@ -86,11 +86,12 @@ async function boot() {
     if (input.locked) {
       const look = input.takeLook();
       player.look(look.dx, look.dy);
-      handleEvents(input.drain(), builder);
+      handleEvents(input.drain(), builder, player);
     }
 
     clock.advance(dt, () => {
       if (input.locked) player.step(input);
+      construction.beforeStep(driveControls(input, player));
       world.step();
       construction.afterStep();
     });
@@ -106,13 +107,41 @@ async function boot() {
 
     fpsAcc += dt; fpsN++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
-    if (input.locked) hud.update(builder.status(), fps);
+    if (input.locked) hud.update(builder.status(player), fps);
 
     renderer.render(scene, camera);
   });
 }
 
-function handleEvents(events, builder) {
+/**
+ * The only vehicle that gets input is the one you are sitting in; everything
+ * else on the meadow rolls on whatever momentum it has.
+ */
+const NO_CONTROLS = new Map();
+function driveControls(input, player) {
+  if (!player.seat || !input.locked) return NO_CONTROLS;
+  const m = new Map();
+  m.set(player.seat.rec.key, {
+    throttle: (input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0),
+    steer: (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0),
+    brake: input.down('Space'),
+  });
+  return m;
+}
+
+function enterOrLeaveSeat(player, builder) {
+  if (player.seat) {
+    const pose = player.seat.rec.vehicle?.seatPose(player.seat.seatId);
+    const out = pose ? pose.position.clone() : null;
+    if (out) out.y += 0.4;
+    player.stand(out ?? { x: 0, y: 2, z: 8 }, player.yaw);
+    return;
+  }
+  const seat = builder.seatUnderCursor();
+  if (seat) player.sit(seat);
+}
+
+function handleEvents(events, builder, player) {
   for (const e of events) {
     if (e.type === 'mouse') {
       if (e.button === 0) builder.primary();
@@ -125,6 +154,7 @@ function handleEvents(events, builder) {
       if (e.code === 'KeyR') builder.rotate(builder_shift());
       else if (e.code === 'KeyC') builder.paintMode = !builder.paintMode;
       else if (e.code === 'KeyG') builder.toggleRelease();
+      else if (e.code === 'KeyE') enterOrLeaveSeat(player, builder);
       else if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5));
         if (n >= 1 && n <= HOTBAR.length) builder.selectPart(n - 1);

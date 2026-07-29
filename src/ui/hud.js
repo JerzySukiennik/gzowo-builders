@@ -38,16 +38,20 @@ export class Hud {
   hide() { this.root.hidden = true; }
 
   update(s, fps) {
-    this.slots.forEach((el, i) => el.classList.toggle('on', HOTBAR[i] === s.partId));
-    this.swatches.forEach((el, i) => el.classList.toggle('on', i === s.color));
+    this.hotbarEl.style.opacity = s.driving ? '0.35' : '1';
+    this.paletteEl.style.opacity = s.driving ? '0.35' : '1';
+    this.slots.forEach((el, i) => el.classList.toggle('on', !s.driving && HOTBAR[i] === s.partId));
+    this.swatches.forEach((el, i) => el.classList.toggle('on', !s.driving && i === s.color));
 
-    const line =
-      `<b>${s.paint ? 'MALOWANIE' : s.part.toUpperCase()}</b>   ` +
-      `OBRÓT ${s.yaw}°/${s.pitch}°   ` +
-      `KOMÓRKA ${s.cell}   ` +
-      `CZĘŚCI ${s.count}   BRYŁY ${s.bodies}   ` +
-      (s.loose ? '<b>LUŹNA — NIE DOBUDUJESZ</b>   ' : '') +
-      `${fps} FPS`;
+    const line = s.driving
+      ? `<b>ZA KIEROWNICĄ</b>   ${s.speed} km/h   KOŁA ${s.wheels}   ` +
+        `SILNIKI ${s.engines}   E — WYSIĄDŹ   ${fps} FPS`
+      : `<b>${s.paint ? 'MALOWANIE' : s.part.toUpperCase()}</b>   ` +
+        (s.auto ? 'OBRÓT AUTO   ' : `OBRÓT ${s.yaw}°/${s.pitch}°   `) +
+        `KOMÓRKA ${s.cell}   ` +
+        `CZĘŚCI ${s.count}   BRYŁY ${s.bodies}   ` +
+        (s.seatHere ? '<b>E — WSIĄDŹ</b>   ' : '') +
+        `${fps} FPS`;
     if (line !== this._last) { this.statusEl.innerHTML = line; this._last = line; }
   }
 }

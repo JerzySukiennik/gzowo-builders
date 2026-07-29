@@ -1,35 +1,50 @@
-// construction.js — the blueprint made visible, solid and breakable.
+// construction.js — constructions: their grids, their bodies, their failure.
 //
-// One place owns the three representations of a placed part: the record in the
+// One place owns the three representations of a placed part: the record in a
 // Blueprint (truth), the mesh (what you see) and the collider (what you stand
 // on). Adding, removing or snapping a part goes through here so they can never
 // drift.
 //
-// The central decision of phase 2 is **one rigid body per connected component,
-// not per part**. A thousand-part build would otherwise be a thousand bodies
-// and three thousand joints, which the target machine will not carry, and which
-// solves into jelly long before it solves into a car. So a construction is one
-// rigid body, and structural failure is modelled by *cutting the graph* and
-// re-forming bodies — a break makes two bodies out of one, rather than a joint
+// **One rigid body per connected component, not per part.** A thousand-part
+// build would otherwise be a thousand bodies and three thousand joints, which
+// the target machine will not carry, and which solves into jelly long before it
+// solves into a car. Structural failure is modelled by *cutting the graph* and
+// re-forming bodies: a break makes two bodies out of one, rather than a joint
 // giving way.
 //
-// A component that touches the meadow is a fixed body while you build on it, so
-// a half-finished tower does not topple as you work. `G` releases it: the same
-// construction becomes dynamic and gravity gets to vote. `G` again snaps it
-// back to the pose it was designed in — this game's version of the lift.
+// **Every construction has its own grid.** The yard is the grid of everything
+// anchored to the meadow; it sits at identity, so its cells are world cells. The
+// moment a construction is released it is carved out into a blueprint of its
+// own and carries a transform. That is what lets a car drive away, be built on
+// while it stands somewhere else entirely, and free up the ground it was
+// designed on.
 
 import * as THREE from 'three';
-import { Blueprint } from '../shared/blueprint.js';
+import { Blueprint, linkKey } from '../shared/blueprint.js';
 import { DENSITY, JOINT_STRENGTH_PER_CELL, PARTS } from '../shared/parts.js';
 import { CELL, cellBoxCentre, oriEuler } from '../shared/grid.js';
 import { geometryFor } from '../render/geometry.js';
 import { materialFor } from '../render/materials.js';
 import { FILTER, FIXED_DT } from '../physics/world.js';
+import { Vehicle } from './vehicle.js';
 
 const G = 9.81;
 /** The weakest link in the catalogue is one cell² of face. A blow that cannot
  *  break even that is not worth a per-link search. */
 const MIN_LINK_FORCE = JOINT_STRENGTH_PER_CELL;
+/**
+ * Speed a body has to lose in one step before it counts as being hit, m/s.
+ *
+ * Cancelling a vehicle's own suspension impulses is never exact — the solver
+ * clamps, contacts fight, and a few centimetres per second of residue survives
+ * every step. That residue is harmless until you notice what the impact rule
+ * does with it: rooted at a wheel, the one link holding that wheel on is asked
+ * to carry the deceleration of the entire car, so 0.2 m/s of noise tears the
+ * wheels off a car that is driving in a straight line. Real blows are metres
+ * per second — the smallest measured in phase 2 was 1.26 from a 0.25 m drop —
+ * so this floor throws away the noise without touching a single real impact.
+ */
+const MIN_IMPACT_DV = 0.6;
 /** A cantilever multiplies the load its root link carries. Half a metre of
  *  overhang doubles it — a stand-in for a real moment calculation, tuned so
  *  walls are safe and long unsupported arms are not. */
@@ -40,7 +55,7 @@ export class Construction {
   constructor(scene, RAPIER, world) {
     this.RAPIER = RAPIER;
     this.world = world;
-    this.blueprint = new Blueprint();
+    this.yard = new Blueprint();
 
     this.root = new THREE.Group();
     this.root.name = 'construction';
@@ -50,36 +65,56 @@ export class Construction {
     this.bodies = new Map();        // body key -> body record
     this.partBody = new Map();      // part id -> body key
     this.partCollider = new Map();  // part id -> Collider
-    this.released = new Set();      // parts the player has cut loose from the ground
+    this.released = new Set();      // parts cut loose from the ground
     this._nextKey = 1;
+    this._nextPartId = 1;
     this.dirty = false;
   }
 
-  get count() { return this.blueprint.parts.size; }
+  get count() {
+    let n = this.yard.parts.size;
+    for (const rec of this.bodies.values()) if (rec.bp !== this.yard) n += rec.bp.parts.size;
+    return n;
+  }
+
   get bodyCount() { return this.bodies.size; }
   get raycastTargets() { return [...this.meshes.values()]; }
 
-  canPlace(partId, cell, ori) { return this.blueprint.canPlace(partId, cell, ori); }
+  bodyOf(partId) { return this.bodies.get(this.partBody.get(partId)) ?? null; }
+  bpOf(partId) { return this.bodyOf(partId)?.bp ?? null; }
+  recordOf(partId) { return this.bpOf(partId)?.parts.get(partId) ?? null; }
 
-  /** Is this part where its blueprint says it is, i.e. safe to build against? */
+  /** Every construction is anchored or not; the cursor needs to know which. */
   isAnchored(partId) {
-    const rec = this.bodies.get(this.partBody.get(partId));
+    const rec = this.bodyOf(partId);
     return !!rec && !rec.dynamic;
   }
 
-  place(partId, cell, ori, color) {
-    const rec = this.blueprint.add({ partId, cell, ori, color });
-    if (!rec) return null;
-    this._insertPart(rec.id);
+  /** Which grid a placement lands in — a body you pointed at, or the yard. */
+  gridFor(targetKey) {
+    const rec = targetKey === null || targetKey === undefined ? null : this.bodies.get(targetKey);
+    return rec ? rec.bp : this.yard;
+  }
+
+  canPlace(partId, cell, ori, targetKey = null) {
+    return this.gridFor(targetKey).canPlace(partId, cell, ori);
+  }
+
+  place(partId, cell, ori, color, targetKey = null) {
+    const bp = this.gridFor(targetKey);
+    const rec = bp.add({ partId, cell, ori, color, id: this._nextPartId++ });
+    if (!rec) { this._nextPartId--; return null; }
+    this._insertPart(bp, rec.id);
     this._relieveOverload();
     return rec;
   }
 
   removeById(id) {
-    const rec = this.blueprint.remove(id);
+    const body = this.bodyOf(id);
+    const bp = body ? body.bp : this.yard;
+    const rec = bp.remove(id);
     if (!rec) return null;
     this.released.delete(id);
-    const body = this.bodies.get(this.partBody.get(id));
     if (body) {
       this._detachPart(body, id);
       if (body.ids.size) this._resplit(body); else this._destroyBody(body.key);
@@ -90,26 +125,91 @@ export class Construction {
     return rec;
   }
 
+  paint(id, color) {
+    const rec = this.recordOf(id);
+    if (!rec) return;
+    rec.color = color;
+    const mesh = this.meshes.get(id);
+    if (mesh) mesh.material = materialFor(color);
+  }
+
+  idOfObject(obj) { return obj?.userData?.partId ?? null; }
+
+  /**
+   * `G`: cut a construction loose from the meadow, or put a loose one back.
+   *
+   * Releasing carves the component out of the yard into a grid of its own, which
+   * both frees the ground it was designed on and gives the construction a frame
+   * that travels with it. Re-anchoring is the same move in reverse, and it can
+   * fail: if someone has built where the car used to stand, there is nowhere to
+   * put it back.
+   */
+  toggleRelease(partId) {
+    const rec = this.bodyOf(partId);
+    if (!rec) return null;
+
+    if (rec.dynamic) {
+      for (const [id, part] of rec.bp.parts) {
+        if (!this.yard.canPlace(part.partId, part.cell, part.ori)) return 'blocked';
+      }
+      this._resetToBlueprint(rec);
+      for (const [id, part] of rec.bp.parts) {
+        this.yard.add({ id, partId: part.partId, cell: part.cell, ori: part.ori, color: part.color });
+        this.released.delete(id);
+      }
+      for (const key of rec.bp.broken) this.yard.broken.add(key);
+      rec.bp = this.yard;
+      this._refreshAnchor(rec);
+      this._relieveOverload();
+      return 'anchored';
+    }
+
+    rec.bp = this._carve(this.yard, rec.ids);
+    for (const id of rec.ids) this.released.add(id);
+    this._refreshAnchor(rec);
+    this.dirty = true;
+    return 'released';
+  }
+
+  /** Move a set of parts out of one grid into a fresh one, links and all. */
+  _carve(from, ids) {
+    const bp = new Blueprint();
+    for (const id of ids) {
+      const part = from.parts.get(id);
+      if (!part) continue;
+      bp.add({ id, partId: part.partId, cell: part.cell, ori: part.ori, color: part.color });
+    }
+    for (const id of ids) {
+      for (const other of ids) {
+        if (id >= other) continue;
+        const key = linkKey(id, other);
+        if (from.broken.has(key)) bp.broken.add(key);
+      }
+    }
+    for (const id of ids) from.remove(id);
+    return bp;
+  }
+
+  // --- forming bodies -------------------------------------------------------
+
   /**
    * Fold a freshly placed part into the bodies it touches.
    *
-   * Placement is the one operation that happens under the player's finger, so
-   * it never scans the world: a new part can only ever *join* components, and
-   * which ones is answered by its own neighbours. Splitting — the expensive
-   * direction — can only be caused by removing a part or snapping a link, and
-   * even then only within the one body affected.
+   * Placement is the one operation that happens under the player's finger, so it
+   * never scans the world: a new part can only ever *join* components, and which
+   * ones is answered by its own neighbours. Splitting — the expensive direction
+   * — can only be caused by removing a part or snapping a link, and even then
+   * only within the one body affected.
    */
-  _insertPart(id) {
+  _insertPart(bp, id) {
     const keys = new Set();
-    for (const n of this.blueprint.neighbours(id)) {
+    for (const n of bp.neighbours(id)) {
       const key = this.partBody.get(n.id);
       const rec = key === undefined ? null : this.bodies.get(key);
-      // Never merge into a construction that has been released: it has moved,
-      // so its parts are not really where the grid says they are.
-      if (rec && !rec.dynamic) keys.add(key);
+      if (rec && rec.bp === bp) keys.add(key);
     }
 
-    if (!keys.size) { this._createBody(new Set([id]), new Map()); this.dirty = true; return; }
+    if (!keys.size) { this._createBody(bp, new Set([id]), new Map()); this.dirty = true; return; }
 
     let target = null;
     for (const key of keys) {
@@ -138,7 +238,7 @@ export class Construction {
       seen.add(start);
       while (stack.length) {
         const cur = stack.pop();
-        for (const n of this.blueprint.neighbours(cur)) {
+        for (const n of rec.bp.neighbours(cur)) {
           if (!rec.ids.has(n.id) || seen.has(n.id)) continue;
           seen.add(n.id); group.add(n.id); stack.push(n.id);
         }
@@ -147,7 +247,10 @@ export class Construction {
     }
     if (groups.length <= 1) { this._refreshAnchor(rec); this.dirty = true; return; }
 
-    groups.sort((a, b) => b.size - a.size);
+    // One fragment keeps the yard and stays put; the rest are carved out and
+    // fall. The keeper is whichever still reaches the meadow, or the largest.
+    const reachesGround = (g) => [...g].some((id) => rec.bp.parts.get(id).cell[1] === 0);
+    groups.sort((a, b) => (reachesGround(b) - reachesGround(a)) || (b.size - a.size));
     const motion = new Map();
     if (rec.dynamic) {
       const snap = {
@@ -158,131 +261,48 @@ export class Construction {
     }
     for (let i = 1; i < groups.length; i++) {
       for (const id of groups[i]) this._detachPart(rec, id);
-      this._createBody(groups[i], motion);
+      // Every fragment gets a grid of its own — including fragments of the yard,
+      // which is what lets them stop being anchored and drop.
+      const bp = this._carve(rec.bp, groups[i]);
+      this._createBody(bp, groups[i], motion);
     }
     this._refreshAnchor(rec);
     this.dirty = true;
   }
 
-  paint(id, color) {
-    const rec = this.blueprint.parts.get(id);
-    if (!rec) return;
-    rec.color = color;
-    const mesh = this.meshes.get(id);
-    if (mesh) mesh.material = materialFor(color);
-  }
-
-  idOfObject(obj) { return obj?.userData?.partId ?? null; }
-
-  /** `G`: cut a construction loose, or put a loose one back where it belongs. */
-  toggleRelease(partId) {
-    const rec = this.bodies.get(this.partBody.get(partId));
-    if (!rec) return null;
-    const wasDynamic = rec.dynamic;
-    for (const id of rec.ids) {
-      if (wasDynamic) this.released.delete(id); else this.released.add(id);
-    }
-    if (wasDynamic) this._resetToBlueprint(rec);
-    this._reform();
-    this._relieveOverload();
-    return wasDynamic ? 'anchored' : 'released';
-  }
-
-  // --- forming bodies -------------------------------------------------------
-
   /**
-   * Full reconciliation: bring every rigid body back in line with the
-   * blueprint's components, from scratch.
-   *
-   * This is the O(everything) path, and it is reserved for the two operations
-   * that can rearrange the world wholesale — putting a released construction
-   * back on its anchor, and loading a save. Placing, removing and snapping all
-   * take incremental paths instead.
-   *
-   * Even here, colliders are not torn down wholesale: each component is matched
-   * to the existing body it shares the most parts with, that body is kept, and
-   * only the parts that actually changed hands move.
+   * Anchored means "still in the yard". Not "touching the ground" — a car
+   * chassis sits a metre up on its wheels and would have nothing to stand on
+   * while you build it, which is exactly the problem a workshop lift solves.
+   * Everything you place is held where you put it until you release it; a piece
+   * that snaps off is carved out of the yard by _resplit and falls.
    */
-  _reform() {
-    const motion = new Map();
-    for (const rec of this.bodies.values()) {
-      if (!rec.dynamic) continue;
-      const snap = {
-        t: rec.body.translation(), q: rec.body.rotation(),
-        lv: rec.body.linvel(), av: rec.body.angvel(), origin: rec.origin,
-      };
-      for (const id of rec.ids) motion.set(id, snap);
-    }
-
-    const groups = this._groups();
-    const claimed = new Set();
-    const assignments = [];
-    for (const group of groups) {
-      const counts = new Map();
-      for (const id of group) {
-        const k = this.partBody.get(id);
-        if (k === undefined || claimed.has(k)) continue;
-        counts.set(k, (counts.get(k) ?? 0) + 1);
-      }
-      let best = null, bestN = 0;
-      for (const [k, n] of counts) if (n > bestN) { bestN = n; best = k; }
-      if (best !== null) claimed.add(best);
-      assignments.push({ key: best, group });
-    }
-
-    for (const key of [...this.bodies.keys()]) {
-      if (!claimed.has(key)) this._destroyBody(key);
-    }
-
-    for (const { key, group } of assignments) {
-      const rec = key === null ? this._createBody(group, motion) : this.bodies.get(key);
-      if (key !== null) {
-        for (const id of [...rec.ids]) if (!group.has(id)) this._detachPart(rec, id);
-        for (const id of group) if (!rec.ids.has(id)) this._attachPart(rec, id);
-      }
-      this._refreshAnchor(rec);
-    }
-    this.dirty = true;
-  }
-
-  /**
-   * Components, with one correction: a construction that has been released has
-   * moved, so its blueprint cells no longer say where it is. Its parts must
-   * never be folded into a body with anything else, however adjacent the two
-   * look on the grid.
-   */
-  _groups() {
-    const groups = this.blueprint.components();
-    const loose = [...this.bodies.values()].filter((r) => r.dynamic);
-    if (!loose.length) return groups;
-
-    const out = [];
-    for (const group of groups) {
-      for (const rec of loose) {
-        const shared = [...rec.ids].filter((id) => group.has(id));
-        if (!shared.length || shared.length === group.size) continue;
-        for (const id of shared) group.delete(id);
-        out.push(new Set(shared));
-      }
-      if (group.size) out.push(group);
-    }
-    return out;
-  }
-
-  _shouldAnchor(ids) {
+  _shouldAnchor(bp, ids) {
+    if (bp !== this.yard) return false;
     for (const id of ids) if (this.released.has(id)) return false;
-    for (const id of ids) if (this.blueprint.parts.get(id).cell[1] === 0) return true;
-    return false;
+    return true;
   }
 
   /** Flip a body between fixed and dynamic without rebuilding it. */
   _refreshAnchor(rec) {
-    const anchored = this._shouldAnchor(rec.ids);
-    if (anchored === !rec.dynamic) return;
+    const anchored = this._shouldAnchor(rec.bp, rec.ids);
+    if (anchored === !rec.dynamic) { this._refreshVehicle(rec); return; }
     const { RAPIER } = this;
     rec.dynamic = !anchored;
     rec.body.setBodyType(anchored ? RAPIER.RigidBodyType.Fixed : RAPIER.RigidBodyType.Dynamic, true);
     rec.prevVel = null;
+    this._refreshVehicle(rec);
+  }
+
+  /** A loose construction with wheels is a vehicle; an anchored one is furniture. */
+  _refreshVehicle(rec) {
+    if (rec.dynamic) {
+      if (!rec.vehicle) rec.vehicle = new Vehicle(this, rec);
+      rec.vehicle.rebuild();
+      if (!rec.vehicle.wheels.length && !rec.vehicle.seats.length) rec.vehicle = null;
+    } else if (rec.vehicle) {
+      rec.vehicle = null;
+    }
   }
 
   /** Put a loose body back exactly where its blueprint drew it. */
@@ -295,19 +315,18 @@ export class Construction {
   }
 
   /**
-   * A body for a group that has no ancestor to inherit. If any of its parts was
-   * moving a moment ago — because it just broke off something — the new body
-   * takes that motion, including the part of the velocity that comes from the
-   * parent's spin about a point this fragment no longer turns around. Without
-   * that term, debris from a spinning wreck drops straight down and the whole
-   * impact reads as fake.
+   * A body for a group. If any of its parts was moving a moment ago — because it
+   * just broke off something — the new body takes that motion, including the
+   * part of the velocity that comes from the parent's spin about a point this
+   * fragment no longer turns around. Without that term, debris from a spinning
+   * wreck drops straight down and the whole impact reads as fake.
    */
-  _createBody(group, motion) {
+  _createBody(bp, group, motion) {
     const { RAPIER, world } = this;
 
     let min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
     for (const id of group) {
-      const r = this.blueprint.parts.get(id);
+      const r = bp.parts.get(id);
       for (let a = 0; a < 3; a++) {
         min[a] = Math.min(min[a], r.cell[a]);
         max[a] = Math.max(max[a], r.cell[a] + r.rs[a]);
@@ -336,7 +355,7 @@ export class Construction {
       };
     }
 
-    const anchored = this._shouldAnchor(group);
+    const anchored = this._shouldAnchor(bp, group);
     const body = world.createRigidBody(
       (anchored ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic())
         .setTranslation(pos.x, pos.y, pos.z)
@@ -350,17 +369,18 @@ export class Construction {
     this.root.add(group3);
 
     const rec = {
-      key: this._nextKey++, body, group: group3, ids: new Set(),
-      origin, dynamic: !anchored, prevVel: null,
+      key: this._nextKey++, bp, body, group: group3, ids: new Set(),
+      origin, dynamic: !anchored, prevVel: null, vehicle: null,
     };
     this.bodies.set(rec.key, rec);
     for (const id of group) this._attachPart(rec, id);
+    this._refreshVehicle(rec);
     return rec;
   }
 
   _attachPart(rec, id) {
     const { RAPIER, world } = this;
-    const part = this.blueprint.parts.get(id);
+    const part = rec.bp.parts.get(id);
     const def = PARTS[part.partId];
     const c = cellBoxCentre(part.cell, part.rs);
     const local = [c[0] - rec.origin[0], c[1] - rec.origin[1], c[2] - rec.origin[2]];
@@ -386,7 +406,7 @@ export class Construction {
         .setDensity(DENSITY)
         .setFriction(0.9)
         .setRestitution(0.05)
-        .setCollisionGroups(FILTER.PART),
+        .setCollisionGroups(def.shape === 'wheel' ? FILTER.WHEEL : FILTER.PART),
       rec.body,
     );
     this.partCollider.set(id, col);
@@ -407,6 +427,7 @@ export class Construction {
   _destroyBody(key) {
     const rec = this.bodies.get(key);
     if (!rec) return;
+    rec.vehicle = null;
     for (const id of [...rec.ids]) this._detachPart(rec, id);
     this.world.removeRigidBody(rec.body);
     this.root.remove(rec.group);
@@ -431,20 +452,18 @@ export class Construction {
       const touched = new Set();
       for (const rec of [...this.bodies.values()]) {
         if (rec.dynamic) continue;
-        const roots = [...rec.ids].filter((id) => this.blueprint.parts.get(id).cell[1] === 0);
+        const roots = [...rec.ids].filter((id) => rec.bp.parts.get(id).cell[1] === 0);
         if (!roots.length) continue;
-        for (const link of this.blueprint.loadBearingLinks(rec.ids, roots)) {
-          const strength = this.blueprint.linkStrength(link.a, link.b);
+        for (const link of rec.bp.loadBearingLinks(rec.ids, roots)) {
+          const strength = rec.bp.linkStrength(link.a, link.b);
           if (strength <= 0) continue;
-          const ca = this.blueprint.centre(link.a), cb = this.blueprint.centre(link.b);
+          const ca = rec.bp.centre(link.a), cb = rec.bp.centre(link.b);
           const arm = Math.hypot(
             link.centre[0] - (ca[0] + cb[0]) / 2,
             link.centre[2] - (ca[2] + cb[2]) / 2,
           );
           const load = link.mass * G * (1 + arm / LEVER_SCALE);
-          if (load > strength && this.blueprint.breakLink(link.a, link.b)) {
-            broke = true; touched.add(rec);
-          }
+          if (load > strength && rec.bp.breakLink(link.a, link.b)) { broke = true; touched.add(rec); }
         }
       }
       if (!broke) return;
@@ -463,12 +482,12 @@ export class Construction {
    * bridges, so nothing asks them to carry the blow alone.
    */
   impact(partId, dv) {
-    const rec = this.bodies.get(this.partBody.get(partId));
+    const rec = this.bodyOf(partId);
     if (!rec) return false;
     let broke = false;
-    for (const link of this.blueprint.loadBearingLinks(rec.ids, [partId])) {
-      if (link.mass * dv / FIXED_DT > this.blueprint.linkStrength(link.a, link.b)
-          && this.blueprint.breakLink(link.a, link.b)) broke = true;
+    for (const link of rec.bp.loadBearingLinks(rec.ids, [partId])) {
+      if (link.mass * dv / FIXED_DT > rec.bp.linkStrength(link.a, link.b)
+          && rec.bp.breakLink(link.a, link.b)) broke = true;
     }
     return broke;
   }
@@ -477,8 +496,8 @@ export class Construction {
    * Called after every physics step. Rapier's own contact-force events report
    * the resting weight of a stack, not the shock of a landing — measured, they
    * came back at ~370 N whether a block fell half a metre or twenty. The
-   * momentum a body actually loses in one step does scale with the fall, so
-   * that is the signal: everything above what gravity alone explains is a blow.
+   * momentum a body actually loses in one step does scale with the fall, so that
+   * is the signal: everything above what gravity alone explains is a blow.
    */
   afterStep() {
     let broke = false;
@@ -490,12 +509,18 @@ export class Construction {
       rec.prevVel = { x: v.x, y: v.y, z: v.z };
       if (!prev) continue;
 
-      const dx = v.x - prev.x, dy = v.y - prev.y, dz = v.z - prev.z;
-      const dv = Math.max(0, Math.hypot(dx, dy, dz) - G * FIXED_DT);
-      if (dv <= 0) continue;
-      // Cheap gate: if the body's whole momentum could not break the weakest
-      // link in the catalogue, no per-link search can find a break either.
-      if (rec.body.mass() * dv / FIXED_DT < MIN_LINK_FORCE) continue;
+      // What the world did to this body = the momentum it gained, less what
+      // gravity explains and less what the vehicle's own suspension pushed with.
+      // Without the second term a car landing on its springs reads as a crash
+      // and shakes itself to pieces the moment it is released.
+      const m = rec.body.mass();
+      const own = rec.vehicle?.appliedImpulse;
+      const dx = v.x - prev.x - (own ? own.x / m : 0);
+      const dy = v.y - prev.y - (own ? own.y / m : 0) + G * FIXED_DT;
+      const dz = v.z - prev.z - (own ? own.z / m : 0);
+      const dv = Math.hypot(dx, dy, dz);
+      if (dv < MIN_IMPACT_DV) continue;
+      if (m * dv / FIXED_DT < MIN_LINK_FORCE) continue;
 
       const struck = this._partFacing(rec, -dx, -dy, -dz);
       if (struck !== null && this.impact(struck, dv)) { broke = true; touched.add(rec); }
@@ -516,7 +541,7 @@ export class Construction {
     const v = new THREE.Vector3();
     let best = null, bestDot = -Infinity;
     for (const id of rec.ids) {
-      const c = this.blueprint.centre(id);
+      const c = rec.bp.centre(id);
       v.set(c[0] - rec.origin[0], c[1] - rec.origin[1], c[2] - rec.origin[2]).applyQuaternion(rot);
       const dot = (v.x * dx + v.y * dy + v.z * dz) / len;
       if (dot > bestDot) { bestDot = dot; best = id; }
@@ -526,31 +551,39 @@ export class Construction {
 
   // --- per-frame ------------------------------------------------------------
 
+  /** Wheels and drive, before the solver runs. */
+  beforeStep(controls) {
+    for (const rec of this.bodies.values()) {
+      if (rec.vehicle) rec.vehicle.step(controls.get(rec.key) ?? null);
+    }
+  }
+
   sync() {
     for (const rec of this.bodies.values()) {
-      if (!rec.dynamic && !this.dirty) continue;
-      const t = rec.body.translation();
-      const q = rec.body.rotation();
-      rec.group.position.set(t.x, t.y, t.z);
-      rec.group.quaternion.set(q.x, q.y, q.z, q.w);
+      if (rec.dynamic || this.dirty) {
+        const t = rec.body.translation();
+        const q = rec.body.rotation();
+        rec.group.position.set(t.x, t.y, t.z);
+        rec.group.quaternion.set(q.x, q.y, q.z, q.w);
+      }
+      rec.vehicle?.syncVisuals();
     }
     this.dirty = false;
   }
 
-  load(data) {
+  clear() {
     for (const key of [...this.bodies.keys()]) this._destroyBody(key);
     for (const id of [...this.meshes.keys()]) this._forgetMesh(id);
     this.released.clear();
-    this.blueprint = Blueprint.fromJSON(data);
-    this._reform();
-    this._relieveOverload();
+    this.yard = new Blueprint();
   }
 }
 
 /** Colliders stay primitive: a box for boxes, a hull for the sloped shapes. */
 function colliderDescFor(RAPIER, def) {
   const hx = def.size[0] * CELL / 2, hy = def.size[1] * CELL / 2, hz = def.size[2] * CELL / 2;
-  if (def.shape === 'box') return RAPIER.ColliderDesc.cuboid(hx, hy, hz);
+  if (def.shape === 'wheel') return RAPIER.ColliderDesc.cylinder(def.wheel.width / 2, def.wheel.radius);
+  if (def.shape === 'box' || def.shape === 'seat') return RAPIER.ColliderDesc.cuboid(hx, hy, hz);
 
   const pts = def.shape === 'wedge'
     ? [

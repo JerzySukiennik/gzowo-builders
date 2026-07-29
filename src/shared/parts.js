@@ -86,6 +86,55 @@ const PART_LIST = [
     model: 'assets/models/corner.glb',
     hotbar: 6,
   },
+
+  // --- drive ---------------------------------------------------------------
+  // A wheel is a mount, not a lump: the ground is found by a ray cast down from
+  // where it sits (see vehicle.js), and its collider is filtered off the terrain
+  // so the two never argue. It spins about its local +Y, which is also the axis
+  // of the cylinder collider and of the mesh — one convention, no baked-in
+  // corrective rotations anywhere.
+  {
+    id: 'wheel',
+    name: 'Koło',
+    category: CATEGORY.DRIVE,
+    size: [4, 2, 4],
+    shape: 'wheel',
+    model: 'assets/models/wheel.glb',
+    hotbar: 7,
+    autoOrient: true,          // the axle points out of the face you place it on
+    wheel: {
+      radius: 0.5,
+      width: 0.5,
+      rest: 0.22,              // suspension travel at rest, metres
+      stiffness: 46000,        // N per metre of compression
+      damping: 3200,           // N per m/s
+      grip: 3.2,               // lateral force per m/s of slip, per tonne
+      steerAngle: 0.52,        // radians at full lock
+    },
+  },
+  {
+    id: 'engine_electric',
+    name: 'Silnik el.',
+    category: CATEGORY.DRIVE,
+    size: [4, 4, 4],
+    shape: 'box',
+    model: 'assets/models/engine_electric.glb',
+    hotbar: 8,
+    // Measured against a fifteen-block car (2.8 t): 9 kN is 3.2 m/s², which is
+    // 0-40 km/h in about four seconds. One engine moves a small car properly,
+    // two make it quick — which is the point of a light plastic density.
+    engine: { force: 9000, topSpeed: 15 },
+  },
+  {
+    id: 'seat',
+    name: 'Siedzenie',
+    category: CATEGORY.DRIVE,
+    size: [4, 4, 4],
+    shape: 'seat',
+    model: 'assets/models/seat.glb',
+    hotbar: 9,
+    seat: { eye: [0, 0.42, 0] },   // where the driver's head sits, in part space
+  },
 ];
 
 export const PARTS = Object.fromEntries(PART_LIST.map((p) => [p.id, p]));
@@ -102,6 +151,8 @@ export function partVolume(part) {
   const box = part.size[0] * part.size[1] * part.size[2] * CELL ** 3;
   if (part.shape === 'wedge') return box / 2;
   if (part.shape === 'corner') return box / 6;
+  if (part.shape === 'wheel') return Math.PI * part.wheel.radius ** 2 * part.wheel.width;
+  if (part.shape === 'seat') return box * 0.45;
   return box;
 }
 

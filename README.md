@@ -24,6 +24,8 @@ modules. Serwer multiplayer (`npm start`) dochodzi w fazie 7.
 | `1`–`6`, `SCROLL` | wybór części |
 | `C` | tryb malowania (wtedy `SCROLL` zmienia kolor) |
 | `G` | puść konstrukcję / cofnij ją na kotwicę |
+| `E` | wsiądź do siedzenia / wysiądź |
+| `WSAD` w siedzeniu | gaz / hamulec-wstecz / skręt |
 | `ESC` | pauza |
 
 ## Stan
@@ -34,7 +36,8 @@ modules. Serwer multiplayer (`npm start`) dochodzi w fazie 7.
 - **Faza 2 — gotowa.** Jedna bryła sztywna na spójną konstrukcję, kotwiczenie do
   ziemi, `G` = puść/cofnij, integralność strukturalna: przeciążone wsporniki
   urywają się same, a uderzenia odrywają to, czego złącze nie utrzymało.
-- Faza 3 — pojazdy: koła, zawieszenie, silniki, siedzenie.
+- **Faza 3 — gotowa.** Własna siatka na konstrukcję (buduj na jadącym aucie),
+  koła na zawieszeniu raycastowym, silniki, siedzenie i jazda z fotela.
 - Fazy 4–9 — mechanizmy, logika, pełna łąka, multiplayer, zapis, dopieszczanie.
 
 ## Architektura
@@ -45,7 +48,8 @@ src/shared/    czysta logika — importowana bez zmian przez klienta i (od fazy 
   parts.js       katalog części, gęstość, paleta
   blueprint.js   co jest zbudowane: rekordy, indeks komórek, graf styków, komponenty
 src/physics/   świat Rapiera, stały krok 1/60, grupy kolizji
-src/build/     construction.js (blueprint ↔ mesh ↔ kolider), builder.js (kursor)
+src/build/     construction.js (blueprint ↔ mesh ↔ kolider), builder.js (kursor),
+               vehicle.js (koła raycastowe, zawieszenie, napęd)
 src/render/    proceduralna geometria części, materiały palety
 src/player/    kinematyczny kontroler postaci FPP
 src/world/     łąka

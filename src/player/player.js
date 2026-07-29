@@ -21,6 +21,7 @@ const AIR_ACCEL = 9;
 const JUMP = 5.4;
 const GRAVITY = -21;
 const MAX_PITCH = Math.PI / 2 - 0.02;
+const SEAT_LOOK = new THREE.Quaternion();
 
 export class Player {
   constructor(RAPIER, world, spawn = [0, 2, 8]) {
@@ -44,6 +45,7 @@ export class Player {
     c.setApplyImpulsesToDynamicBodies(true);
     this.controller = c;
 
+    this.seat = null;          // { rec, seatId } while driving
     this.velocity = new THREE.Vector3();
     this.yaw = 0; // spawn looking at the build pad, not away from it
     this.pitch = 0;
@@ -67,7 +69,31 @@ export class Player {
     return out.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
   }
 
+  /**
+   * Get into a seat. The capsule is switched off rather than carried along: a
+   * kinematic body wedged inside a car it is also colliding with is a fight
+   * nobody wins, and there is nothing for it to do while you are driving.
+   */
+  sit(seat) {
+    this.seat = seat;
+    this.collider.setEnabled(false);
+    this.velocity.set(0, 0, 0);
+    this.yaw = 0;
+    this.pitch = 0;
+  }
+
+  /** Get out, next to the vehicle. */
+  stand(worldPos, yaw) {
+    this.seat = null;
+    this.collider.setEnabled(true);
+    this.body.setTranslation({ x: worldPos.x, y: worldPos.y, z: worldPos.z }, true);
+    this.velocity.set(0, 0, 0);
+    this.yaw = yaw;
+    this.pitch = 0;
+  }
+
   step(input) {
+    if (this.seat) return;
     // --- wish direction in the horizontal plane ----------------------------
     let fx = 0, fz = 0;
     if (input.down('KeyW')) fz -= 1;
@@ -102,7 +128,7 @@ export class Player {
       y: this.velocity.y * FIXED_DT,
       z: this.velocity.z * FIXED_DT,
     };
-    this.controller.computeColliderMovement(this.collider, desired, undefined, FILTER.PLAYER);
+    this.controller.computeColliderMovement(this.collider, desired, undefined, FILTER.PLAYER_QUERY);
     const move = this.controller.computedMovement();
     const t = this.body.translation();
     this.body.setNextKinematicTranslation({ x: t.x + move.x, y: t.y + move.y, z: t.z + move.z });
@@ -122,6 +148,19 @@ export class Player {
 
   /** Point the camera at the head position for this frame. */
   applyToCamera(camera) {
+    if (this.seat) {
+      const pose = this.seat.rec.vehicle?.seatPose(this.seat.seatId);
+      if (pose) {
+        camera.position.copy(pose.position);
+        // Look around relative to the seat, so a turning car takes the view with
+        // it instead of sliding out from under it.
+        camera.quaternion.copy(pose.quaternion)
+          .multiply(SEAT_LOOK.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ')));
+        return;
+      }
+      this.seat = null;          // the seat was destroyed under us
+      this.collider.setEnabled(true);
+    }
     const p = this.position;
     camera.position.set(p.x, p.y + EYE_HEIGHT, p.z);
     camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));

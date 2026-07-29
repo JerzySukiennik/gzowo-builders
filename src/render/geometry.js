@@ -10,6 +10,7 @@
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CELL } from '../shared/grid.js';
 
 const BEVEL = 0.02;
@@ -30,7 +31,11 @@ export function geometryFor(part) {
   let geo;
   if (part.shape === 'wedge') geo = wedgeGeometry(w, h, d);
   else if (part.shape === 'corner') geo = cornerGeometry(w, h, d);
-  else geo = new RoundedBoxGeometry(w, h, d, 2, Math.min(BEVEL, Math.min(w, h, d) / 3));
+  else if (part.shape === 'wheel') {
+    geo = new THREE.CylinderGeometry(part.wheel.radius, part.wheel.radius, part.wheel.width, 20);
+  } else if (part.shape === 'seat') {
+    geo = seatGeometry(w, h, d);
+  } else geo = new RoundedBoxGeometry(w, h, d, 2, Math.min(BEVEL, Math.min(w, h, d) / 3));
   cache.set(part.id, geo);
   return geo;
 }
@@ -71,6 +76,15 @@ function cornerGeometry(w, h, d) {
     b, c, apex,     // the cut face
   ];
   return fromTriangles(tris);
+}
+
+/** Seat: a base slab and a back, facing -Z (the direction the driver looks). */
+function seatGeometry(w, h, d) {
+  const base = new RoundedBoxGeometry(w, h * 0.28, d * 0.8, 2, BEVEL);
+  base.translate(0, -h * 0.36, d * 0.1);
+  const back = new RoundedBoxGeometry(w, h * 0.72, d * 0.22, 2, BEVEL);
+  back.translate(0, h * 0.14, d * 0.39);
+  return mergeGeometries([base, back]);
 }
 
 /** Half-extents, in metres, of a part's collider box in its local frame. */
