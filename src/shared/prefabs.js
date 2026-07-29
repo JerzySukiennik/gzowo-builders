@@ -66,11 +66,58 @@ const button = () => ([
   { t: 'button', c: [1, 4, 1], o: UP },
 ]);
 
+/** A go-anywhere buggy: big wheels, petrol, two seats. */
+const buggy = () => {
+  const out = [];
+  for (let x = 0; x < 3; x++) {
+    for (let z = 0; z < 4; z++) out.push({ t: 'block', c: [3 + x * 4, 6, z * 4], o: 0, k: 1 });
+  }
+  // A 1.5 m wheel needs its hub one radius up, not wherever the road wheel sat:
+  // put it higher and the chassis rests on its belly with the wheels dangling,
+  // which looks like a physics bug and is arithmetic.
+  out.push({ t: 'wheel_offroad', c: [0, 1, 0], o: LEFT });
+  out.push({ t: 'wheel_offroad', c: [0, 1, 10], o: LEFT });
+  out.push({ t: 'wheel_offroad', c: [15, 1, 0], o: RIGHT });
+  out.push({ t: 'wheel_offroad', c: [15, 1, 10], o: RIGHT });
+  out.push({ t: 'seat', c: [3, 10, 4], o: 0 });
+  out.push({ t: 'seat_passenger', c: [7, 10, 4], o: 0 });
+  out.push({ t: 'engine_petrol', c: [7, 10, 12], o: 0 });
+  out.push({ t: 'lamp', c: [4, 10, 0], o: UP });
+  out.push({ t: 'lamp', c: [10, 10, 0], o: UP });
+  return out;
+};
+
+/** A crane: turntable, long ram, jib. */
+const crane = () => ([
+  { t: 'block', c: [0, 0, 0], o: 0, k: 11 },
+  { t: 'block', c: [4, 0, 0], o: 0, k: 11 },
+  { t: 'block', c: [0, 4, 0], o: 0, k: 11 },
+  { t: 'block', c: [4, 4, 0], o: 0, k: 11 },
+  { t: 'motor_rotary', c: [0, 8, 0], o: UP },
+  { t: 'piston_long', c: [0, 10, 0], o: UP },
+  { t: 'beam', c: [0, 14, 0], o: 0, k: 2 },
+  { t: 'beam', c: [8, 14, 0], o: 0, k: 2 },
+  { t: 'lamp', c: [1, 16, 1], o: UP },
+]);
+
+/** A blinker: a switch, two timers and a NOT, wired to a lamp. */
+const blinker = () => ([
+  { t: 'block', c: [0, 0, 0], o: 0, k: 11 },
+  { t: 'block', c: [4, 0, 0], o: 0, k: 11 },
+  { t: 'switch', c: [1, 4, 1], o: UP },
+  { t: 'timer', c: [5, 4, 1], o: UP },
+  { t: 'gate_not', c: [5, 4, 3], o: UP },
+  { t: 'lamp', c: [1, 4, 3], o: UP },
+]);
+
 const PREFAB_LIST = [
   { id: 'pf_car', name: 'Autko', build: car, hotbar: 1 },
   { id: 'pf_lift', name: 'Winda', build: lift, hotbar: 2 },
   { id: 'pf_arm', name: 'Ramię', build: arm, hotbar: 3 },
   { id: 'pf_button', name: 'Pulpit', build: button, hotbar: 4 },
+  { id: 'pf_buggy', name: 'Buggy', build: buggy, hotbar: 5 },
+  { id: 'pf_crane', name: 'Dźwig', build: crane, hotbar: 6 },
+  { id: 'pf_blinker', name: 'Migacz', build: blinker, hotbar: 7 },
 ];
 
 export const PREFABS = Object.fromEntries(PREFAB_LIST.map((p) => {

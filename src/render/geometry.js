@@ -50,6 +50,8 @@ export function geometryFor(part) {
     geo = seatGeometry(w, h, d);
   } else if (part.shape === 'button' || part.shape === 'switch') {
     geo = buttonGeometry(w, h, d, part.shape === 'switch');
+  } else if (part.shape === 'lamp' || part.shape === 'sensor') {
+    geo = logicGeometry(w, h, d);
   } else if (part.shape === 'logic') {
     geo = logicGeometry(w, h, d);
   } else if (part.shape === 'piston') {
@@ -150,12 +152,15 @@ function buttonGeometry(w, h, d, isSwitch) {
   base.translate(0, -h * 0.22, 0);
   let top;
   if (isSwitch) {
-    top = new RoundedBoxGeometry(w * 0.26, h * 0.5, d * 0.5, 2, BEVEL);
-    top.rotateX(-0.5);
-    top.translate(0, h * 0.24, 0);
+    top = new RoundedBoxGeometry(w * 0.26, h * 0.52, d * 0.42, 2, BEVEL);
+    top.rotateX(-0.42);
+    top.translate(0, h * 0.26, 0);
   } else {
-    top = new THREE.CylinderGeometry(w * 0.30, w * 0.34, h * 0.34, 14);
-    top.translate(0, h * 0.22, 0);
+    // Fills the rest of the cell box: a mesh smaller than its collider means you
+    // can stand on air above a button, which reads as a bug even though nothing
+    // is wrong with the physics.
+    top = new THREE.CylinderGeometry(w * 0.30, w * 0.34, h * 0.45, 14);
+    top.translate(0, h * 0.275, 0);
   }
   return merge([base, top]);
 }
@@ -164,8 +169,8 @@ function buttonGeometry(w, h, d, isSwitch) {
 function logicGeometry(w, h, d) {
   const base = new RoundedBoxGeometry(w, h * 0.62, d, 2, BEVEL);
   base.translate(0, -h * 0.19, 0);
-  const die = new RoundedBoxGeometry(w * 0.56, h * 0.34, d * 0.56, 2, BEVEL);
-  die.translate(0, h * 0.28, 0);
+  const die = new RoundedBoxGeometry(w * 0.56, h * 0.38, d * 0.56, 2, BEVEL);
+  die.translate(0, h * 0.31, 0);
   return merge([base, die]);
 }
 

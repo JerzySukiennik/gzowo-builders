@@ -39,7 +39,10 @@ export const TOOLBARS = [
             toolSlot('release'), toolSlot('wire')],
   },
   { id: 'blocks',   name: 'BLOKI',      slots: partsOf(CATEGORY.STRUCTURE).map(partSlot) },
-  { id: 'machines', name: 'MASZYNY',    slots: [...partsOf(CATEGORY.DRIVE), ...partsOf(CATEGORY.MOTION)].map(partSlot) },
+  // Drive and motion were one bar until the catalogue outgrew nine number keys.
+  // A bar you cannot reach from the keyboard is a bar nobody uses.
+  { id: 'drive',    name: 'NAPĘD',      slots: partsOf(CATEGORY.DRIVE).map(partSlot) },
+  { id: 'motion',   name: 'MECHANIZMY', slots: partsOf(CATEGORY.MOTION).map(partSlot) },
   { id: 'logic',    name: 'LOGIKA',     slots: partsOf(CATEGORY.LOGIC).map(partSlot) },
   { id: 'prefabs',  name: 'GOTOWCE',    slots: PREFAB_IDS.map(prefabSlot) },
 ];

@@ -125,6 +125,23 @@ const PART_LIST = [
     },
   },
   {
+    id: 'wheel_offroad',
+    name: 'Koło terenowe',
+    paintable: false,
+    category: CATEGORY.DRIVE,
+    size: [6, 3, 6],
+    shape: 'wheel',
+    model: 'assets/models/wheel_offroad.glb',
+    hotbar: 2,
+    autoOrient: true,
+    wheel: {
+      radius: 0.75, width: 0.75,
+      rest: 0.34,             // half again the travel of the road wheel
+      grip: 3.2,
+      steerAngle: 0.46,
+    },
+  },
+  {
     id: 'engine_electric',
     paintable: false,
     name: 'Silnik el.',
@@ -132,7 +149,7 @@ const PART_LIST = [
     size: [4, 4, 4],
     shape: 'box',
     model: 'assets/models/engine_electric.glb',
-    hotbar: 2,
+    hotbar: 3,
     // Measured against a fifteen-block car (2.8 t): 9 kN is 3.2 m/s², which is
     // 0-40 km/h in about four seconds. One engine moves a small car properly,
     // two make it quick — which is the point of a light plastic density.
@@ -161,6 +178,18 @@ const PART_LIST = [
     mechanism: { kind: 'piston', travel: 0.75, force: 40000, speed: 1.1 },
   },
   {
+    id: 'piston_long',
+    name: 'Tłok długi',
+    paintable: false,
+    category: CATEGORY.MOTION,
+    size: [4, 4, 4],
+    shape: 'piston',
+    model: 'assets/models/piston_long.glb',
+    hotbar: 2,
+    autoOrient: true,
+    mechanism: { kind: 'piston', travel: 1.9, force: 40000, speed: 0.9 },
+  },
+  {
     id: 'hinge',
     paintable: false,
     name: 'Zawias',
@@ -168,7 +197,7 @@ const PART_LIST = [
     size: [4, 2, 4],
     shape: 'hinge',
     model: 'assets/models/hinge.glb',
-    hotbar: 2,
+    hotbar: 3,
     autoOrient: true,
     mechanism: { kind: 'hinge', limit: 2.36 },      // free swing, +-135 degrees
   },
@@ -180,11 +209,27 @@ const PART_LIST = [
     size: [4, 2, 4],
     shape: 'bearing',
     model: 'assets/models/motor_rotary.glb',
-    hotbar: 3,
+    hotbar: 4,
     autoOrient: true,
     mechanism: { kind: 'bearing', torque: 26000, speed: 2.6 },
   },
 
+  {
+    id: 'engine_petrol',
+    name: 'Silnik spalinowy',
+    paintable: false,
+    category: CATEGORY.DRIVE,
+    size: [4, 4, 4],
+    shape: 'box',
+    model: 'assets/models/engine_petrol.glb',
+    hotbar: 4,
+    // Twice the punch of the electric motor and half again the speed, but it
+    // has to be revving: `lowEnd` throttles it back below its power band, so a
+    // petrol build is quicker down a straight and worse off the line. Two
+    // engines that differ only in a number are two engines nobody would choose
+    // between.
+    engine: { force: 17000, topSpeed: 23, lowEnd: 0.30, band: 7.5 },
+  },
   {
     id: 'seat',
     paintable: false,
@@ -193,8 +238,21 @@ const PART_LIST = [
     size: [4, 4, 4],
     shape: 'seat',
     model: 'assets/models/seat.glb',
-    hotbar: 3,
-    seat: { eye: [0, 0.42, 0] },   // where the driver's head sits, in part space
+    hotbar: 1,
+    seat: { eye: [0, 0.42, 0], driver: true },
+  },
+  {
+    id: 'seat_passenger',
+    name: 'Fotel',
+    paintable: false,
+    category: CATEGORY.DRIVE,
+    size: [4, 4, 4],
+    shape: 'seat',
+    model: 'assets/models/seat_passenger.glb',
+    hotbar: 5,
+    // Same seat, no controls. Somebody has to be able to come along for the
+    // ride without taking the wheel out of the driver's hands.
+    seat: { eye: [0, 0.42, 0], driver: false },
   },
 
   // --- logic ---------------------------------------------------------------
@@ -249,6 +307,33 @@ const PART_LIST = [
     logic: { kind: 'or' },
   },
   {
+    id: 'lamp',
+    name: 'Reflektor',
+    paintable: false,
+    category: CATEGORY.LOGIC,
+    size: [2, 2, 2],
+    shape: 'lamp',
+    model: 'assets/models/lamp.glb',
+    hotbar: 7,
+    autoOrient: true,
+    // A lamp is a logic *sink*: it does nothing to the world but show you the
+    // signal. Debugging a circuit by watching a piston is guesswork; watching a
+    // row of lamps is reading.
+    logic: { kind: 'lamp' },
+  },
+  {
+    id: 'sensor',
+    name: 'Czujnik',
+    paintable: false,
+    category: CATEGORY.LOGIC,
+    size: [2, 2, 2],
+    shape: 'sensor',
+    model: 'assets/models/sensor.glb',
+    hotbar: 8,
+    autoOrient: true,
+    logic: { kind: 'sensor', range: 6 },   // looks along its mount normal
+  },
+  {
     id: 'gate_not',
     name: 'Bramka NIE',
     category: CATEGORY.LOGIC,
@@ -282,6 +367,7 @@ export function partVolume(part) {
   if (part.shape === 'piston') return box * 0.55;
   if (part.shape === 'hinge' || part.shape === 'bearing') return box * 0.7;
   if (part.logic) return box * 0.8;
+  if (part.shape === 'lamp' || part.shape === 'sensor') return box * 0.75;
   return box;
 }
 

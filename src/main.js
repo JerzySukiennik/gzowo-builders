@@ -185,6 +185,8 @@ function spitDust(construction, fx) {
 const NO_CONTROLS = new Map();
 function driveControls(input, player) {
   if (!player.seat || !input.locked) return NO_CONTROLS;
+  const seat = player.seat.rec.vehicle?.seats.find((x) => x.id === player.seat.seatId);
+  if (seat && seat.driver === false) return NO_CONTROLS;   // passengers just ride
   const m = new Map();
   m.set(player.seat.rec.key, {
     throttle: (input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0),

@@ -15,7 +15,12 @@ import { PARTS } from '../shared/parts.js';
 import { CELL } from '../shared/grid.js';
 import { registerModel } from './geometry.js';
 
-const SIZE_TOLERANCE = 0.02; // metres — a chamfer shaves a little off the box
+// A chamfer shaves a little off every box, and it shaves proportionally more
+// off a big part than a small one. A flat 20 mm was fine until the off-road
+// wheel arrived at 1.5 m; 2% catches a wrong axis or a wrong scale (both off by
+// a quarter or more) without failing an honest bevel.
+const SIZE_FLOOR = 0.02;
+const SIZE_FRACTION = 0.02;
 
 export async function loadPartModels() {
   const loader = new GLTFLoader();
@@ -60,7 +65,7 @@ async function loadOne(loader, part) {
   // mesh describe different objects and everything downstream is a lie.
   for (let a = 0; a < 3; a++) {
     const got = [size.x, size.y, size.z][a];
-    if (Math.abs(got - expect[a]) > SIZE_TOLERANCE) {
+    if (Math.abs(got - expect[a]) > Math.max(SIZE_FLOOR, expect[a] * SIZE_FRACTION)) {
       throw new Error(`rozmiar ${got.toFixed(3)} m zamiast ${expect[a].toFixed(3)} m na osi ${'XYZ'[a]}`);
     }
   }

@@ -16,7 +16,13 @@
 
 import * as THREE from 'three';
 import { PARTS } from '../shared/parts.js';
-import { cellBoxCentre } from '../shared/grid.js';
+import { cellBoxCentre, rotateVec } from '../shared/grid.js';
+import { FILTER } from '../physics/world.js';
+
+const _q = new THREE.Quaternion();
+const _from = new THREE.Vector3();
+const _dir = new THREE.Vector3();
+const _t = new THREE.Vector3();
 
 const PASSES = 2;
 /** How long a button stays on after a poke, in physics steps. */
@@ -67,6 +73,7 @@ export class Logic {
           const kind = def.logic.kind;
           if (kind === 'switch') continue;                       // held by hand
           if (kind === 'button') { this.state.set(id, this.pulse.has(id)); continue; }
+          if (kind === 'sensor') { this.state.set(id, this._sees(rec, id, def.logic.range)); continue; }
 
           const inputs = rec.bp.inputsOf(id).map((src) => this.state.get(src) === true);
           let out;
@@ -93,10 +100,57 @@ export class Logic {
   }
 
   /**
+   * A sensor looks along its own mount normal and fires when anything solid is
+   * closer than its range. Deliberately a ray and not a volume: a cone would
+   * need a shape query every step for every sensor, and one ray is enough to
+   * build a garage door that opens when you drive at it.
+   */
+  _sees(rec, id, range) {
+    const { RAPIER, world } = this.c;
+    if (!RAPIER) return false;
+    const part = rec.bp.parts.get(id);
+    const c = cellBoxCentre(part.cell, part.rs);
+    const d = rotateVec(part.ori, 0, 1, 0);
+    const q = rec.body.rotation();
+    _q.set(q.x, q.y, q.z, q.w);
+    const t = rec.body.translation();
+    _from.set(c[0] - rec.origin[0], c[1] - rec.origin[1], c[2] - rec.origin[2])
+      .applyQuaternion(_q).add(_t.set(t.x, t.y, t.z));
+    _dir.set(d[0], d[1], d[2]).applyQuaternion(_q).normalize();
+    _from.addScaledVector(_dir, 0.2);              // start outside its own box
+    const hit = world.castRay(new RAPIER.Ray(_from, _dir), range, true,
+                              undefined, FILTER.RAY, undefined, rec.body);
+    return !!hit;
+  }
+
+  /** Lamps show their signal. Nothing else in a circuit is visible at a glance. */
+  syncLamps() {
+    if (!this.c.view) return;
+    for (const rec of this.c.bodies.values()) {
+      for (const id of rec.ids) {
+        const def = PARTS[rec.bp.parts.get(id).partId];
+        if (def?.shape !== 'lamp') continue;
+        const mesh = this.c.meshes.get(id);
+        if (!mesh) continue;
+        const on = this.state.get(id) === true;
+        if (mesh.userData.lampOn === on) continue;
+        mesh.userData.lampOn = on;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          if (!m.emissive) continue;
+          if (m.userData.baseEmissive === undefined) m.userData.baseEmissive = m.emissiveIntensity ?? 0;
+          if (m.userData.baseEmissive > 0) m.emissiveIntensity = on ? m.userData.baseEmissive : 0;
+        }
+      }
+    }
+  }
+
+  /**
    * Draw the cables. One line list for the whole world, rebuilt when the wiring
    * changes — a few dozen segments, so redrawing beats tracking each one.
    */
   syncVisuals() {
+    this.syncLamps();
     if (!this.c.view || !this.viewDirty) return;
     this.viewDirty = false;
     const pts = [];

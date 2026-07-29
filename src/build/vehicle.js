@@ -67,10 +67,18 @@ export class Vehicle {
     // wheel's rolling direction is the cross product of its axle and up, and
     // that comes out reversed on one side of the car. Left and right wheels then
     // drive against each other and the car crabs sideways at walking pace.
+    // Forwards comes from the *driver's* seat: a passenger facing backwards
+    // must not decide which way the car goes.
     let seatOri = null;
     for (const id of rec.ids) {
       const def = PARTS[rec.bp.parts.get(id).partId];
-      if (def.seat) { seatOri = rec.bp.parts.get(id).ori; break; }
+      if (def.seat?.driver !== false) { seatOri = rec.bp.parts.get(id).ori; break; }
+    }
+    if (seatOri === null) {
+      for (const id of rec.ids) {
+        const def = PARTS[rec.bp.parts.get(id).partId];
+        if (def.seat) { seatOri = rec.bp.parts.get(id).ori; break; }
+      }
     }
     const f = seatOri === null ? [0, 0, -1] : rotateVec(seatOri, 0, 0, -1);
     this.forward.set(f[0], f[1], f[2]).normalize();
@@ -78,7 +86,7 @@ export class Vehicle {
     for (const id of rec.ids) {
       const part = rec.bp.parts.get(id);
       const def = PARTS[part.partId];
-      if (def.seat) this.seats.push({ id, part, def, local: this._localOf(part) });
+      if (def.seat) this.seats.push({ id, part, def, local: this._localOf(part), driver: def.seat.driver !== false });
       if (def.wheel) this.wheels.push(this._makeWheel(id, part, def));
     }
 
@@ -94,11 +102,18 @@ export class Vehicle {
     this._tuneSprings();
     this.engineForce = 0;
     this.topSpeed = 0;
+    this.lowEnd = 1;
+    this.band = 1;
     for (const id of rec.ids) {
       const def = PARTS[rec.bp.parts.get(id).partId];
       if (!def.engine) continue;
       this.engineForce += def.engine.force;
       this.topSpeed = Math.max(this.topSpeed, def.engine.topSpeed);
+      // A petrol engine has to be revving. Taking the weakest low end on the
+      // build means one petrol engine makes the whole thing feel like a petrol
+      // build, rather than being averaged into nothing.
+      this.lowEnd = Math.min(this.lowEnd, def.engine.lowEnd ?? 1);
+      this.band = Math.max(this.band, def.engine.band ?? 1);
     }
   }
 
@@ -217,7 +232,9 @@ export class Vehicle {
         // there. This holds most of the pull until the last third.
         const ratio = clamp((vLong * Math.sign(throttle)) / this.topSpeed, 0, 1);
         const fade = this.topSpeed > 0 ? 1 - ratio ** 3 : 1;
-        fLong = throttle * perWheel * fade;
+        const revs = this.lowEnd >= 1 ? 1
+          : this.lowEnd + (1 - this.lowEnd) * Math.min(1, Math.abs(vLong) / this.band);
+        fLong = throttle * perWheel * fade * revs;
       }
       fLong -= vLong * ROLL_RESIST * spring;
       if (throttle === 0 && !braking) {
