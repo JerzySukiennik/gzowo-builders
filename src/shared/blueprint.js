@@ -32,18 +32,26 @@ export class Blueprint {
     this.occupancy = new Map();   // "x,y,z" -> part id
     this.adj = new Map();         // id -> Map(other id -> contact area in cells²)
     this.mech = new Map();        // mechanism part id -> Set(ids on its moving face)
+    this.wires = new Map();       // from part id -> Set(to part ids)
     this.broken = new Set();      // link keys that have snapped and stay snapped
     this._nextId = 1;
   }
 
   /** All cells of a hypothetical placement are free and above ground? */
-  canPlace(partId, cell, ori) {
+  /**
+   * All cells free and above ground? `pending` lets a multi-part stamp check
+   * itself against its own not-yet-placed parts, so a prefab is all-or-nothing
+   * rather than landing half-built.
+   */
+  canPlace(partId, cell, ori, pending = null) {
     const def = PARTS[partId];
     if (!def) return false;
     const rs = rotateSize(ori, def.size);
     if (cell[1] < 0) return false; // nothing below the meadow
-    return forEachCell(cell, rs, (x, y, z) =>
-      this.occupancy.has(cellKey(x, y, z)) ? false : true);
+    return forEachCell(cell, rs, (x, y, z) => {
+      const key = cellKey(x, y, z);
+      return this.occupancy.has(key) || pending?.has(key) ? false : true;
+    });
   }
 
   /** Place a part. Returns the record, or null if the space is taken. */
@@ -117,6 +125,31 @@ export class Blueprint {
     }
   }
 
+  /**
+   * Cables. A wire carries a boolean from a logic part to another logic part or
+   * to a mechanism, and unlike a weld it does not have to touch: that is the
+   * whole point of wiring rather than stacking.
+   */
+  connect(from, to) {
+    if (from === to || !this.parts.has(from) || !this.parts.has(to)) return false;
+    if (!this.wires.has(from)) this.wires.set(from, new Set());
+    this.wires.get(from).add(to);
+    return true;
+  }
+
+  disconnectAll(id) {
+    let any = this.wires.delete(id);
+    for (const set of this.wires.values()) any = set.delete(id) || any;
+    return any;
+  }
+
+  /** Everything wired *into* this part. */
+  inputsOf(id) {
+    const out = [];
+    for (const [from, set] of this.wires) if (set.has(id)) out.push(from);
+    return out;
+  }
+
   /** Parts a mechanism carries on its far face — the ones it has to move. */
   movingSideOf(id) { return this.mech.get(id) ?? EMPTY; }
 
@@ -155,6 +188,7 @@ export class Blueprint {
     }
     this.adj.delete(id);
     this.mech.delete(id);
+    this.disconnectAll(id);
     this.parts.delete(id);
     // A broken link to a part that no longer exists would resurrect as a break
     // if that part id were ever reused; drop it with the part.
@@ -321,6 +355,7 @@ export class Blueprint {
         i: p.id, t: p.partId, c: p.cell, o: p.ori, k: p.color,
       })),
       broken: [...this.broken],
+      wires: [...this.wires].map(([from, set]) => [from, [...set]]),
     };
   }
 
@@ -330,6 +365,7 @@ export class Blueprint {
       bp.add({ id: p.i, partId: p.t, cell: p.c, ori: p.o, color: p.k });
     }
     for (const k of data?.broken ?? []) bp.broken.add(k);
+    for (const [from, tos] of data?.wires ?? []) for (const to of tos) bp.connect(from, to);
     return bp;
   }
 }

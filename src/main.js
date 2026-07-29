@@ -12,8 +12,9 @@ import { Player } from './player/player.js';
 import { Construction } from './build/construction.js';
 import { Builder } from './build/builder.js';
 import { Hud } from './ui/hud.js';
+import { SLOTS_MAX } from './build/toolbars.js';
 import { loadPartModels } from './render/models.js';
-import { HOTBAR_MAX } from './shared/parts.js';
+
 
 const gate = document.getElementById('gate');
 const gateBtn = document.getElementById('gate-btn');
@@ -134,7 +135,11 @@ function driveControls(input, player) {
   return m;
 }
 
-function enterOrLeaveSeat(player, builder) {
+/**
+ * `E` is the one "do the obvious thing here" key: get out of a seat, get into
+ * one, or work whatever switch you are looking at.
+ */
+function interact(player, builder) {
   if (player.seat) {
     const pose = player.seat.rec.vehicle?.seatPose(player.seat.seatId);
     const out = pose ? pose.position.clone() : null;
@@ -143,7 +148,9 @@ function enterOrLeaveSeat(player, builder) {
     return;
   }
   const seat = builder.seatUnderCursor();
-  if (seat) player.sit(seat);
+  if (seat) { player.sit(seat); return; }
+  const hit = builder.target?.hitPartId;
+  if (hit !== null && hit !== undefined) builder.construction.logic.interact(hit);
 }
 
 function handleEvents(events, builder, player) {
@@ -153,17 +160,16 @@ function handleEvents(events, builder, player) {
       else if (e.button === 2) builder.secondary();
       else if (e.button === 1) builder.pipette();
     } else if (e.type === 'wheel') {
-      if (builder.paintMode) builder.cycleColor(e.dir);
-      else builder.cyclePart(e.dir);
+      if (builder.tool === 'paint') builder.cycleColor(e.dir);
+      else builder.cycleSlot(e.dir);
     } else if (e.type === 'key') {
       if (e.code === 'KeyR') builder.rotate(builder_shift());
-      else if (e.code === 'KeyC') builder.paintMode = !builder.paintMode;
-      else if (e.code === 'KeyG') builder.toggleRelease();
-      else if (e.code === 'KeyE') enterOrLeaveSeat(player, builder);
-      else if (e.code === 'Tab') builder.cycleCategory(builder_shift() ? -1 : 1);
+      else if (e.code === 'Tab') builder.cycleToolbar(builder_shift() ? -1 : 1);
+      else if (e.code === 'KeyE') interact(player, builder);
+      else if (e.code === 'KeyV') player.thirdPerson = !player.thirdPerson;
       else if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5));
-        if (n >= 1 && n <= HOTBAR_MAX) builder.selectPart(n - 1);
+        if (n >= 1 && n <= SLOTS_MAX) builder.selectSlot(n - 1);
       }
     }
   }

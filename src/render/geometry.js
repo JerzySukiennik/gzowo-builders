@@ -48,6 +48,10 @@ export function geometryFor(part) {
     geo = new THREE.CylinderGeometry(part.wheel.radius, part.wheel.radius, part.wheel.width, 20);
   } else if (part.shape === 'seat') {
     geo = seatGeometry(w, h, d);
+  } else if (part.shape === 'button' || part.shape === 'switch') {
+    geo = buttonGeometry(w, h, d, part.shape === 'switch');
+  } else if (part.shape === 'logic') {
+    geo = logicGeometry(w, h, d);
   } else if (part.shape === 'piston') {
     geo = pistonGeometry(w, h, d);
   } else if (part.shape === 'hinge' || part.shape === 'bearing') {
@@ -138,6 +142,31 @@ function bearingGeometry(w, h, d, powered) {
     parts.push(ring);
   }
   return merge(parts);
+}
+
+/** Button and switch: a base with something to press or flick on top. */
+function buttonGeometry(w, h, d, isSwitch) {
+  const base = new RoundedBoxGeometry(w, h * 0.55, d, 2, BEVEL);
+  base.translate(0, -h * 0.22, 0);
+  let top;
+  if (isSwitch) {
+    top = new RoundedBoxGeometry(w * 0.26, h * 0.5, d * 0.5, 2, BEVEL);
+    top.rotateX(-0.5);
+    top.translate(0, h * 0.24, 0);
+  } else {
+    top = new THREE.CylinderGeometry(w * 0.30, w * 0.34, h * 0.34, 14);
+    top.translate(0, h * 0.22, 0);
+  }
+  return merge([base, top]);
+}
+
+/** Gates and timers: a slab with a raised die on it, so a circuit reads. */
+function logicGeometry(w, h, d) {
+  const base = new RoundedBoxGeometry(w, h * 0.62, d, 2, BEVEL);
+  base.translate(0, -h * 0.19, 0);
+  const die = new RoundedBoxGeometry(w * 0.56, h * 0.34, d * 0.56, 2, BEVEL);
+  die.translate(0, h * 0.28, 0);
+  return merge([base, die]);
 }
 
 /** Half-extents, in metres, of a part's collider box in its local frame. */

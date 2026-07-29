@@ -196,6 +196,67 @@ const PART_LIST = [
     hotbar: 3,
     seat: { eye: [0, 0.42, 0] },   // where the driver's head sits, in part space
   },
+
+  // --- logic ---------------------------------------------------------------
+  // Small, cheap and paintable, because a circuit you cannot colour-code is a
+  // circuit you cannot read. Every one of them holds a single boolean; wires
+  // carry it from part to part and finally into a mechanism.
+  {
+    id: 'button',
+    name: 'Przycisk',
+    category: CATEGORY.LOGIC,
+    size: [2, 2, 2],
+    shape: 'button',
+    hotbar: 1,
+    autoOrient: true,
+    logic: { kind: 'button' },      // on while you hold E on it
+  },
+  {
+    id: 'switch',
+    name: 'Przełącznik',
+    category: CATEGORY.LOGIC,
+    size: [2, 2, 2],
+    shape: 'switch',
+    hotbar: 2,
+    autoOrient: true,
+    logic: { kind: 'switch' },      // E flips it and it stays
+  },
+  {
+    id: 'timer',
+    name: 'Timer',
+    category: CATEGORY.LOGIC,
+    size: [2, 2, 2],
+    shape: 'logic',
+    hotbar: 3,
+    logic: { kind: 'timer', delay: 60 },   // one second, in physics steps
+  },
+  {
+    id: 'gate_and',
+    name: 'Bramka I',
+    category: CATEGORY.LOGIC,
+    size: [2, 2, 2],
+    shape: 'logic',
+    hotbar: 4,
+    logic: { kind: 'and' },
+  },
+  {
+    id: 'gate_or',
+    name: 'Bramka LUB',
+    category: CATEGORY.LOGIC,
+    size: [2, 2, 2],
+    shape: 'logic',
+    hotbar: 5,
+    logic: { kind: 'or' },
+  },
+  {
+    id: 'gate_not',
+    name: 'Bramka NIE',
+    category: CATEGORY.LOGIC,
+    size: [2, 2, 2],
+    shape: 'logic',
+    hotbar: 6,
+    logic: { kind: 'not' },
+  },
 ];
 
 export const PARTS = Object.fromEntries(PART_LIST.map((p) => [p.id, p]));
@@ -206,21 +267,10 @@ export const PART_IDS = PART_LIST.map((p) => p.id);
  * twelve parts and will be nowhere near enough after the logic gates. Tab walks
  * the categories; the numbers stay meaningful inside one.
  */
-export const CATEGORY_ORDER = [CATEGORY.STRUCTURE, CATEGORY.DRIVE, CATEGORY.MOTION];
-export const CATEGORY_NAME = {
-  [CATEGORY.STRUCTURE]: 'KONSTRUKCJA',
-  [CATEGORY.DRIVE]: 'NAPĘD',
-  [CATEGORY.MOTION]: 'MECHANIZMY',
-  [CATEGORY.LOGIC]: 'LOGIKA',
-};
-
-export const HOTBARS = Object.fromEntries(CATEGORY_ORDER.map((cat) => [cat,
-  PART_LIST.filter((p) => p.category === cat && p.hotbar)
-           .sort((a, b) => a.hotbar - b.hotbar)
-           .map((p) => p.id)]));
-
-/** Longest hotbar — how many number keys the UI has to offer. */
-export const HOTBAR_MAX = Math.max(...Object.values(HOTBARS).map((h) => h.length));
+export const partsOf = (cat) => PART_LIST
+  .filter((p) => p.category === cat && p.hotbar)
+  .sort((a, b) => a.hotbar - b.hotbar)
+  .map((p) => p.id);
 
 /** Volume of a part in m³, accounting for shapes that are not a full box. */
 export function partVolume(part) {
@@ -231,6 +281,7 @@ export function partVolume(part) {
   if (part.shape === 'seat') return box * 0.45;
   if (part.shape === 'piston') return box * 0.55;
   if (part.shape === 'hinge' || part.shape === 'bearing') return box * 0.7;
+  if (part.logic) return box * 0.8;
   return box;
 }
 

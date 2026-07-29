@@ -22,6 +22,12 @@ const JUMP = 5.4;
 const GRAVITY = -21;
 const MAX_PITCH = Math.PI / 2 - 0.02;
 const SEAT_LOOK = new THREE.Quaternion();
+const TPP_DISTANCE = 6.5;
+const TPP_HEIGHT = 1.1;
+const TPP_MIN = 1.2;
+const _v = new THREE.Vector3();
+const _back = new THREE.Vector3();
+const _target = new THREE.Vector3();
 
 export class Player {
   constructor(RAPIER, world, spawn = [0, 2, 8]) {
@@ -46,6 +52,11 @@ export class Player {
     this.controller = c;
 
     this.seat = null;          // { rec, seatId } while driving
+    // On foot the camera is the head, per the design. In a seat it is not: you
+    // cannot judge a machine you are sitting inside, and half of what this game
+    // is about is watching your own contraption work. V switches back.
+    this.thirdPerson = true;
+    this.camDistance = TPP_DISTANCE;
     this.velocity = new THREE.Vector3();
     this.yaw = 0; // spawn looking at the build pad, not away from it
     this.pitch = 0;
@@ -67,6 +78,19 @@ export class Player {
   forward(out = new THREE.Vector3()) {
     const cp = Math.cos(this.pitch);
     return out.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
+  }
+
+  /**
+   * How far back the camera can go before it would end up inside something.
+   * Without this the view drops through the meadow the moment you drive up to a
+   * wall, and a chase camera that clips is worse than no chase camera.
+   */
+  _freeDistance(target, back) {
+    const { RAPIER, world } = this;
+    const hit = world.castRay(new RAPIER.Ray(target, back), this.camDistance, true,
+                              undefined, FILTER.PLAYER_QUERY, undefined, this.seat?.rec.body);
+    const toi = hit ? (hit.timeOfImpact ?? hit.toi) : this.camDistance;
+    return Math.max(TPP_MIN, Math.min(this.camDistance, toi - 0.25));
   }
 
   /**
@@ -151,11 +175,17 @@ export class Player {
     if (this.seat) {
       const pose = this.seat.rec.vehicle?.seatPose(this.seat.seatId);
       if (pose) {
-        camera.position.copy(pose.position);
         // Look around relative to the seat, so a turning car takes the view with
         // it instead of sliding out from under it.
         camera.quaternion.copy(pose.quaternion)
           .multiply(SEAT_LOOK.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ')));
+        if (!this.thirdPerson) {
+          camera.position.copy(pose.position);
+          return;
+        }
+        _target.copy(pose.position).addScaledVector(_v.set(0, 1, 0), TPP_HEIGHT);
+        _back.set(0, 0, 1).applyQuaternion(camera.quaternion);
+        camera.position.copy(_target).addScaledVector(_back, this._freeDistance(_target, _back));
         return;
       }
       this.seat = null;          // the seat was destroyed under us

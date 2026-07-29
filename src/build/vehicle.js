@@ -34,6 +34,15 @@ const SLIP_SCALE = 2.5;
 /** Drag, as a fraction of wheel load per m/s. Measured: at 0.02 it ate most of
  *  the engine by 8 m/s and the car plateaued at half its rated speed. */
 const ROLL_RESIST = 0.008;
+/**
+ * A wheel nobody is driving holds. Real wheels do — through gearbox, motor
+ * cogging and brake drag — and without it a parked build wanders off the moment
+ * the meadow is a hair off level, which is exactly what a workshop floor is not
+ * supposed to do. The hold is a fraction of available grip, applied against
+ * whatever motion exists, so it stops a roll dead but never launches anything.
+ */
+const HOLD_GRIP = 0.75;
+const HOLD_SPEED = 1.4;
 const BRAKE_FORCE = 1.4;
 
 export class Vehicle {
@@ -211,6 +220,9 @@ export class Vehicle {
         fLong = throttle * perWheel * fade;
       }
       fLong -= vLong * ROLL_RESIST * spring;
+      if (throttle === 0 && !braking) {
+        fLong -= clamp(vLong / HOLD_SPEED, -1, 1) * budget * HOLD_GRIP;
+      }
       if (braking) fLong -= vLong * BRAKE_FORCE * spring / Math.max(1, Math.abs(vLong));
       fLong = clamp(fLong, -budget, budget);
 

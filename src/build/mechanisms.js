@@ -95,7 +95,7 @@ export class Mechanisms {
       }
     }
     const joint = world.createImpulseJoint(params, rec.body, other.body, true);
-    const m = { joint, spec, bp: rec.bp, target: 0, a: rec.body, b: other.body,
+    const m = { joint, spec, id, bp: rec.bp, target: 0, a: rec.body, b: other.body,
                 a1: anchor(rec.origin), a2: anchor(other.origin) };
     if (spec.kind === 'piston') {
       // The model is a *retracted* piston: it fills its cell and its rod is
@@ -122,7 +122,13 @@ export class Mechanisms {
   step(byGrid) {
     if (this.dirty) this.refresh();
     for (const m of this.joints.values()) {
-      const ctl = byGrid.get(m.bp)?.mech;
+      // A wired mechanism takes its orders from the circuit; only an unwired one
+      // still answers the arrow keys. That is the whole promise of phase 5: once
+      // you have built the controls, you stop driving the parts by hand.
+      const wired = this.c.logic.signalFor(m.bp, m.id);
+      const ctl = wired === null
+        ? byGrid.get(m.bp)?.mech
+        : { extend: wired ? 1 : -1, turn: wired ? 1 : 0 };
       // Rapier sends idle bodies to sleep and configuring a motor does not wake
       // them: measured, a piston commanded to full extension sat still for four
       // seconds because both its bodies were asleep. Any live command wakes them.

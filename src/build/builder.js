@@ -8,7 +8,9 @@
 // the right of it.
 
 import * as THREE from 'three';
-import { PARTS, HOTBARS, CATEGORY_ORDER, CATEGORY_NAME, PALETTE } from '../shared/parts.js';
+import { PARTS, PALETTE } from '../shared/parts.js';
+import { PREFABS } from '../shared/prefabs.js';
+import { SLOT, SLOTS_MAX, TOOLBARS, TOOLS } from './toolbars.js';
 import { CELL, ORIENTATIONS, cellBoxCentre, makeOri, oriEuler, pitchOf, rotateSize, rotateVec, worldToCell, yawOf } from '../shared/grid.js';
 import { geometryFor } from '../render/geometry.js';
 import { ghostBlocked, ghostEdge, ghostOk } from '../render/materials.js';
@@ -47,18 +49,20 @@ export class Builder {
     this.camera = camera;
     this.worldTargets = worldTargets;  // ground + static props, for building on
 
-    this.categoryIndex = 0;
-    this.partIndex = 0;
+    this.barIndex = 0;                 // which toolbar
+    this.slotIndex = 0;                 // which slot inside it
     this.color = 2;                    // signal yellow reads well against grass
     this.ori = 0;
-    this.paintMode = false;
+    this.wireFrom = null;              // first end of a cable being run
 
     this.raycaster = new THREE.Raycaster();
     this.raycaster.far = REACH;
 
     // The preview must be invisible to its own raycast — `visible = false` is
     // not enough, three still ray-tests hidden objects.
-    this.ghost = new THREE.Mesh(geometryFor(PARTS[this.partId]), ghostOk);
+    // The cursor starts on the tools bar, which previews nothing, so the ghost
+    // is seeded with any geometry and swapped the moment a part is picked up.
+    this.ghost = new THREE.Mesh(geometryFor(PARTS.block), ghostOk);
     this.ghost.visible = false;
     this.ghost.raycast = () => {};
     scene.add(this.ghost);
@@ -76,26 +80,32 @@ export class Builder {
     this._origin = new THREE.Vector3();
   }
 
-  get category() { return CATEGORY_ORDER[this.categoryIndex]; }
-  get hotbar() { return HOTBARS[this.category]; }
-  get partId() { return this.hotbar[Math.min(this.partIndex, this.hotbar.length - 1)]; }
-  get part() { return PARTS[this.partId]; }
+  get bar() { return TOOLBARS[this.barIndex]; }
+  get slot() { return this.bar.slots[Math.min(this.slotIndex, this.bar.slots.length - 1)]; }
+  get holdingPart() { return this.slot.kind === SLOT.PART; }
+  get holdingPrefab() { return this.slot.kind === SLOT.PREFAB; }
+  get tool() { return this.slot.kind === SLOT.TOOL ? this.slot.id : null; }
+  /** The part the ghost should show — a part slot, or a prefab's first block. */
+  get partId() { return this.holdingPart ? this.slot.id : null; }
+  get part() { return this.partId ? PARTS[this.partId] : null; }
 
-  selectPart(index) {
-    const n = this.hotbar.length;
-    this.partIndex = ((index % n) + n) % n;
+  selectSlot(index) {
+    const n = this.bar.slots.length;
+    this.slotIndex = ((index % n) + n) % n;
+    this.wireFrom = null;
     this._refreshGhostGeometry();
   }
 
-  /** Tab walks the categories; the numbers stay meaningful inside one. */
-  cycleCategory(dir = 1) {
-    const n = CATEGORY_ORDER.length;
-    this.categoryIndex = ((this.categoryIndex + dir) % n + n) % n;
-    this.partIndex = Math.min(this.partIndex, this.hotbar.length - 1);
+  /** Tab walks the toolbars; the numbers stay meaningful inside one. */
+  cycleToolbar(dir = 1) {
+    const n = TOOLBARS.length;
+    this.barIndex = ((this.barIndex + dir) % n + n) % n;
+    this.slotIndex = Math.min(this.slotIndex, this.bar.slots.length - 1);
+    this.wireFrom = null;
     this._refreshGhostGeometry();
   }
 
-  cyclePart(dir) { this.selectPart(this.partIndex + dir); }
+  cycleSlot(dir) { this.selectSlot(this.slotIndex + dir); }
   cycleColor(dir) { this.color = (this.color + dir + PALETTE.length) % PALETTE.length; }
   rotate(pitchAxis) {
     this.ori = pitchAxis
@@ -104,6 +114,7 @@ export class Builder {
   }
 
   _refreshGhostGeometry() {
+    if (!this.holdingPart) { this.ghost.visible = false; this.edges.visible = false; return; }
     const geo = geometryFor(this.part);
     this.ghost.geometry = geo;
     this.edges.geometry.dispose();
@@ -173,8 +184,10 @@ export class Builder {
     // A wheel is useless pointing the wrong way, so drive parts turn themselves
     // to the face you stick them on rather than making you cycle R until the
     // axle happens to line up.
-    const ori = this.part.autoOrient ? orientToFace(this._normal) : this.ori;
-    const rs = rotateSize(ori, this.part.size);
+    const held = this.holdingPart ? this.part
+      : (this.holdingPrefab ? PARTS[PREFABS[this.slot.id].parts[0].t] : null);
+    const ori = held?.autoOrient ? orientToFace(this._normal) : this.ori;
+    const rs = held ? rotateSize(ori, held.size) : [1, 1, 1];
     const cell = [...anchor];
     for (let a = 0; a < 3; a++) {
       if (a === axis) {
@@ -186,10 +199,12 @@ export class Builder {
     }
 
     const targetKey = target ? target.key : null;
-    const valid = this.construction.canPlace(this.partId, cell, ori, targetKey);
+    const valid = this.holdingPart
+      ? this.construction.canPlace(this.partId, cell, ori, targetKey)
+      : (this.holdingPrefab ? this.construction.canStamp(this.slot.id, cell, targetKey) : false);
     this.target = { cell, ori, valid, hitPartId, targetKey, normal: [...n] };
 
-    if (this.paintMode) {
+    if (!held) {                       // a tool has nothing to preview
       this.ghost.visible = false;
       this.edges.visible = false;
       return;
@@ -226,22 +241,57 @@ export class Builder {
     return rec.vehicle.seats.some((s) => s.id === id) ? { rec, seatId: id } : null;
   }
 
+  /** Left button: use whatever the cursor is holding. */
   primary() {
-    if (!this.target) return;
-    if (this.paintMode) {
-      if (this.target.hitPartId !== null) this.construction.paint(this.target.hitPartId, this.color);
-      return;
-    }
-    if (this.target.valid) {
-      this.construction.place(
-        this.partId, this.target.cell, this.target.ori, this.color, this.target.targetKey);
+    if (!this.target) return null;
+    const hit = this.target.hitPartId;
+    switch (this.slot.kind) {
+      case SLOT.PART:
+        if (this.target.valid) {
+          this.construction.place(this.partId, this.target.cell, this.target.ori,
+                                  this.color, this.target.targetKey);
+        }
+        return null;
+      case SLOT.PREFAB:
+        if (this.target.valid) {
+          this.construction.stamp(this.slot.id, this.target.cell, this.color, this.target.targetKey);
+        }
+        return null;
+      default:
+        return this._useTool(this.slot.id, hit);
     }
   }
 
-  secondary() {
-    if (this.target?.hitPartId !== null && this.target) {
-      this.construction.removeById(this.target.hitPartId);
+  _useTool(tool, hit) {
+    if (hit === null || hit === undefined) {
+      if (tool === 'wire') this.wireFrom = null;
+      return null;
     }
+    switch (tool) {
+      case 'remove': this.construction.removeById(hit); return 'usunięto';
+      case 'paint': return this.construction.paint(hit, this.color) ? 'pomalowano' : 'nie do malowania';
+      case 'clone': this.pipette(); return 'skopiowano';
+      case 'release': return this.construction.toggleRelease(hit);
+      case 'wire': {
+        if (this.wireFrom === null) { this.wireFrom = hit; return 'wybierz cel'; }
+        const ok = this.construction.connect(this.wireFrom, hit);
+        this.wireFrom = null;
+        return ok ? 'połączono' : 'nie da się połączyć';
+      }
+      default: return null;
+    }
+  }
+
+  /** Right button stays "undo the last thing you did", whatever you hold. */
+  secondary() {
+    const hit = this.target?.hitPartId;
+    if (hit === null || hit === undefined) return;
+    if (this.slot.kind === SLOT.TOOL && this.slot.id === 'wire') {
+      this.construction.disconnectAll(hit);
+      this.wireFrom = null;
+      return;
+    }
+    this.construction.removeById(hit);
   }
 
   /** `G`: cut the construction under the cursor loose, or put it back. */
@@ -257,11 +307,14 @@ export class Builder {
     if (id === null || id === undefined) return;
     const rec = this.construction.recordOf(id);
     if (!rec) return;
-    // The pipette may need to switch category as well as slot.
-    const cat = CATEGORY_ORDER.indexOf(PARTS[rec.partId].category);
-    if (cat >= 0) this.categoryIndex = cat;
-    const idx = this.hotbar.indexOf(rec.partId);
-    if (idx >= 0) this.selectPart(idx);
+    // Find whichever toolbar carries this part and hold it.
+    for (let b = 0; b < TOOLBARS.length; b++) {
+      const idx = TOOLBARS[b].slots.findIndex((sl) => sl.kind === SLOT.PART && sl.id === rec.partId);
+      if (idx < 0) continue;
+      this.barIndex = b;
+      this.selectSlot(idx);
+      break;
+    }
     this.ori = rec.ori;
     this.color = rec.color;
   }
@@ -281,20 +334,23 @@ export class Builder {
     }
     const cell = this.target?.cell;
     return {
-      part: this.part.name,
+      held: this.slot.name ?? PARTS[this.slot.id]?.name ?? this.slot.id,
       partId: this.partId,
       color: this.color,
       yaw: yawOf(this.ori) * 90,
       pitch: pitchOf(this.ori) * 90,
-      paint: this.paintMode,
-      auto: !!this.part.autoOrient,
+      paint: this.tool === 'paint',
+      auto: !!this.part?.autoOrient,
       cell: cell ? `${cell[0]} ${cell[1]} ${cell[2]}` : '—',
-      categoryName: CATEGORY_NAME[this.category],
-      hotbar: this.hotbar,
+      barName: this.bar.name,
+      slots: this.bar.slots,
+      slotIndex: this.slotIndex,
+      toolHint: this.tool ? TOOLS[this.tool].hint : null,
+      wiring: this.wireFrom !== null,
       count: this.construction.count,
       bodies: this.construction.bodyCount,
       seatHere: !!this.seatUnderCursor(),
-      unpaintable: this.paintMode && this.target?.hitPartId !== null
+      unpaintable: this.tool === 'paint' && this.target?.hitPartId !== null
         && this.target?.hitPartId !== undefined
         && PARTS[this.construction.recordOf(this.target.hitPartId)?.partId]?.paintable === false,
       cellSize: CELL,

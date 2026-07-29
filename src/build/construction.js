@@ -22,12 +22,14 @@
 import * as THREE from 'three';
 import { Blueprint, linkKey } from '../shared/blueprint.js';
 import { DENSITY, JOINT_STRENGTH_PER_CELL, PARTS } from '../shared/parts.js';
-import { CELL, cellBoxCentre, oriEuler } from '../shared/grid.js';
+import { CELL, cellBoxCentre, oriEuler, rotateSize } from '../shared/grid.js';
 import { geometryFor, modelMaterialFor } from '../render/geometry.js';
 import { materialFor } from '../render/materials.js';
 import { FILTER, FIXED_DT } from '../physics/world.js';
 import { Vehicle } from './vehicle.js';
 import { Mechanisms } from './mechanisms.js';
+import { Logic } from './logic.js';
+import { PREFABS } from '../shared/prefabs.js';
 
 const G = 9.81;
 /** The weakest link in the catalogue is one cell² of face. A blow that cannot
@@ -68,6 +70,7 @@ export class Construction {
     this.partCollider = new Map();  // part id -> Collider
     this.released = new Set();      // parts cut loose from the ground
     this.mechanisms = new Mechanisms(this);
+    this.logic = new Logic(this);
     this._nextKey = 1;
     this._nextPartId = 1;
     this.dirty = false;
@@ -132,11 +135,67 @@ export class Construction {
     }
     this._forgetMesh(id);
     this._relieveOverload();
+    this.logic.markDirty();
     this.dirty = true;
     return rec;
   }
 
   /** Paint a part — if it is the kind of part that takes paint at all. */
+  /** Would this whole machine fit here? */
+  canStamp(prefabId, cell, targetKey = null) {
+    const bp = this.gridFor(targetKey);
+    if (!bp) return false;
+    const pf = PREFABS[prefabId];
+    if (!pf) return false;
+    // Nothing is placed until every part of it fits, so a prefab never lands
+    // half-built with the rest silently dropped.
+    const taken = new Set();
+    for (const it of pf.parts) {
+      const at = [cell[0] + it.c[0], cell[1] + it.c[1], cell[2] + it.c[2]];
+      if (!bp.canPlace(it.t, at, it.o ?? 0, taken)) return false;
+      const rs = PARTS[it.t] && rotateSizeOf(it);
+      for (let i = 0; i < rs[0]; i++) for (let j = 0; j < rs[1]; j++) for (let k = 0; k < rs[2]; k++) {
+        taken.add(`${at[0] + i},${at[1] + j},${at[2] + k}`);
+      }
+    }
+    return true;
+  }
+
+  /** Drop a whole machine in one click. */
+  stamp(prefabId, cell, color, targetKey = null) {
+    if (!this.canStamp(prefabId, cell, targetKey)) return null;
+    const pf = PREFABS[prefabId];
+    const placed = [];
+    for (const it of pf.parts) {
+      const at = [cell[0] + it.c[0], cell[1] + it.c[1], cell[2] + it.c[2]];
+      const rec = this.place(it.t, at, it.o ?? 0, it.k ?? color, targetKey);
+      if (rec) placed.push(rec.id);
+    }
+    return placed;
+  }
+
+  /** Run a cable between two parts of the same construction. */
+  connect(from, to) {
+    const a = this.bodyOf(from), b = this.bodyOf(to);
+    if (!a || !b || a.bp !== b.bp) return false;
+    const src = PARTS[a.bp.parts.get(from).partId];
+    const dst = PARTS[b.bp.parts.get(to).partId];
+    // A cable carries a signal out of logic and into logic or a mechanism.
+    if (!src.logic) return false;
+    if (!dst.logic && !dst.mechanism) return false;
+    const ok = a.bp.connect(from, to);
+    if (ok) this.logic.markDirty();
+    return ok;
+  }
+
+  disconnectAll(id) {
+    const rec = this.bodyOf(id);
+    if (!rec) return false;
+    const ok = rec.bp.disconnectAll(id);
+    if (ok) this.logic.markDirty();
+    return ok;
+  }
+
   paint(id, color) {
     const rec = this.recordOf(id);
     if (!rec || modelMaterialFor(rec.partId)) return false;
@@ -176,6 +235,7 @@ export class Construction {
         this.released.delete(id);
       }
       for (const key of bp.broken) this.yard.broken.add(key);
+      for (const [from, tos] of bp.wires) for (const to of tos) this.yard.connect(from, to);
       // Back in the yard nothing articulates, so the machine becomes one body
       // again: drop the pieces and re-form them from the yard.
       const ids = [...bp.parts.keys()];
@@ -196,7 +256,8 @@ export class Construction {
   }
 
   /** Move a set of parts out of one grid into a fresh one, links and all. */
-  _carve(from, ids) {
+  _carve(from, idsIn) {
+    const ids = idsIn instanceof Set ? idsIn : new Set(idsIn);
     const bp = new Blueprint();
     for (const id of ids) {
       const part = from.parts.get(id);
@@ -209,6 +270,9 @@ export class Construction {
         const key = linkKey(id, other);
         if (from.broken.has(key)) bp.broken.add(key);
       }
+      // Cables travel with the machine. Without this a lift wired on the ground
+      // goes dead the instant you release it, and the wire is simply gone.
+      for (const to of from.wires.get(id) ?? []) if (ids.has(to)) bp.connect(id, to);
     }
     for (const id of ids) from.remove(id);
     return bp;
@@ -644,6 +708,7 @@ export class Construction {
       if (rec.vehicle) rec.vehicle.step(byGrid.get(rec.bp) ?? null);
     }
     this.mechanisms.step(byGrid);
+    this.logic.step();
   }
 
   sync() {
@@ -657,11 +722,13 @@ export class Construction {
       rec.vehicle?.syncVisuals();
     }
     this.mechanisms.syncVisuals();
+    this.logic.syncVisuals();
     this.dirty = false;
   }
 
   clear() {
     this.mechanisms.clear();
+    this.logic.markDirty();
     for (const key of [...this.bodies.keys()]) this._destroyBody(key);
     for (const id of [...this.meshes.keys()]) this._forgetMesh(id);
     this.released.clear();
@@ -686,4 +753,9 @@ function colliderDescFor(RAPIER, def) {
       ];
   return RAPIER.ColliderDesc.convexHull(new Float32Array(pts.flat()))
       ?? RAPIER.ColliderDesc.cuboid(hx, hy, hz);
+}
+
+/** Rotated cell size of a prefab entry. */
+function rotateSizeOf(it) {
+  return rotateSize(it.o ?? 0, PARTS[it.t].size);
 }
