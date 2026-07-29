@@ -1,0 +1,135 @@
+// main.js — Gzowo Builders, entry point.
+//
+// Boot order: Rapier WASM → renderer → meadow → player → construction → HUD.
+// The loop is fixed-step physics with a variable-rate render on top; nothing in
+// the simulation ever reads the frame time directly.
+
+import * as THREE from 'three';
+import { initPhysics, StepClock } from './physics/world.js';
+import { buildMeadow } from './world/meadow.js';
+import { Input } from './core/input.js';
+import { Player } from './player/player.js';
+import { Construction } from './build/construction.js';
+import { Builder } from './build/builder.js';
+import { Hud } from './ui/hud.js';
+import { HOTBAR } from './shared/parts.js';
+
+const gate = document.getElementById('gate');
+const gateBtn = document.getElementById('gate-btn');
+const gateText = document.getElementById('gate-text');
+const loadingEl = document.getElementById('loading');
+
+boot().catch((err) => {
+  console.error(err);
+  loadingEl.textContent = 'BŁĄD — zobacz konsolę';
+  gateText.textContent = String(err?.message ?? err);
+});
+
+async function boot() {
+  const { RAPIER, world } = await initPhysics();
+
+  // --- renderer ------------------------------------------------------------
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); // the 5500M is not a 4K card
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // No tone mapping: this world is painted plastic under a poster sun. ACES
+  // desaturates exactly the bright greens and yellows the art is built from.
+  renderer.toneMapping = THREE.NoToneMapping;
+  document.body.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.06, 400);
+
+  const meadow = buildMeadow(scene, RAPIER, world);
+  const worldTargets = scene.children.filter((o) => o.isMesh);
+
+  const player = new Player(RAPIER, world, [0, 2, 8]);
+  const construction = new Construction(scene, RAPIER, world);
+  const input = new Input(renderer.domElement);
+  const builder = new Builder(scene, construction, camera, worldTargets);
+  const hud = new Hud();
+
+  // Debug handle: the console is the only inspector this project has.
+  globalThis.GB = { THREE, scene, camera, renderer, world, RAPIER, player, construction, builder, input, hud };
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // --- the gate ------------------------------------------------------------
+  loadingEl.hidden = true;
+  gateBtn.hidden = false;
+  gateBtn.addEventListener('click', () => input.lock());
+  input.onLockChange = (locked) => {
+    gate.classList.toggle('hidden', locked);
+    if (locked) hud.show(); else hud.hide();
+    if (!locked) gateBtn.textContent = 'Wróć do gry';
+  };
+
+  // --- loop ----------------------------------------------------------------
+  const clock = new StepClock();
+  let last = performance.now();
+  let fps = 60, fpsAcc = 0, fpsN = 0;
+
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt = Math.min((now - last) / 1000, 0.25);
+    last = now;
+
+    if (input.locked) {
+      const look = input.takeLook();
+      player.look(look.dx, look.dy);
+      handleEvents(input.drain(), builder);
+    }
+
+    clock.advance(dt, () => {
+      if (input.locked) player.step(input);
+      world.step();
+    });
+
+    player.applyToCamera(camera);
+    // Keep the shadow frustum around the builder rather than the origin.
+    meadow.sun.position.set(camera.position.x + 38, 54, camera.position.z + 26);
+    meadow.sun.target.position.set(camera.position.x, 0, camera.position.z);
+    meadow.sun.target.updateMatrixWorld();
+
+    if (input.locked) builder.update(player);
+
+    fpsAcc += dt; fpsN++;
+    if (fpsAcc >= 0.5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
+    if (input.locked) hud.update(builder.status(), fps);
+
+    renderer.render(scene, camera);
+  });
+}
+
+function handleEvents(events, builder) {
+  for (const e of events) {
+    if (e.type === 'mouse') {
+      if (e.button === 0) builder.primary();
+      else if (e.button === 2) builder.secondary();
+      else if (e.button === 1) builder.pipette();
+    } else if (e.type === 'wheel') {
+      if (builder.paintMode) builder.cycleColor(e.dir);
+      else builder.cyclePart(e.dir);
+    } else if (e.type === 'key') {
+      if (e.code === 'KeyR') builder.rotate(builder_shift());
+      else if (e.code === 'KeyC') builder.paintMode = !builder.paintMode;
+      else if (e.code.startsWith('Digit')) {
+        const n = Number(e.code.slice(5));
+        if (n >= 1 && n <= HOTBAR.length) builder.selectPart(n - 1);
+      }
+    }
+  }
+}
+
+// R rotates yaw; Shift+R tips the part on its side.
+let shiftHeld = false;
+addEventListener('keydown', (e) => { if (e.key === 'Shift') shiftHeld = true; });
+addEventListener('keyup', (e) => { if (e.key === 'Shift') shiftHeld = false; });
+const builder_shift = () => shiftHeld;

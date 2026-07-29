@@ -1,0 +1,169 @@
+<!-- Gzowo Builders — entry: importmap, canvas, HUD, pointer-lock gate -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gzowo Builders</title>
+<style>
+  /* ===========================================================================
+     Design system — "workshop tag"
+     The game is chunky, bright and cartoon; the UI is the paper tag wired to a
+     machine in a workshop: warm off-white card, heavy black rule, one colour of
+     ink for anything selected. Nothing translucent, nothing glassy — this world
+     is made of thick painted plastic and the interface is made of card.
+
+     Type: heavy system sans for names, mono for labels/keys/numbers.
+     Colour: paper + ink carry the structure; signal yellow means "this is the
+     one you are holding". Radius 4px — a moulded edge, not a rounded rectangle.
+     =========================================================================== */
+  :root {
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+    --paper: #F4EFE2;
+    --paper-2: #E6DFCD;
+    --ink: #191712;
+    --ink-70: rgba(25, 23, 18, 0.70);
+    --ink-45: rgba(25, 23, 18, 0.45);
+    --ink-15: rgba(25, 23, 18, 0.15);
+    --signal: #FFC42E;
+    --signal-deep: #E09A00;
+
+    --r: 4px;
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #8FC7E8; }
+  body { font-family: var(--sans); color: var(--ink); user-select: none; -webkit-user-select: none; }
+  canvas { display: block; }
+
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+
+  /* --- crosshair: a builder's tick, not a gunsight ------------------------- */
+  #crosshair {
+    position: fixed; left: 50%; top: 50%; width: 18px; height: 18px;
+    transform: translate(-50%, -50%); opacity: 0.9;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: #fff;
+    box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.45);
+  }
+  #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
+  #crosshair::after { top: 50%; left: 0; height: 2px; width: 100%; margin-top: -1px; }
+
+  /* --- hotbar -------------------------------------------------------------- */
+  #hotbar {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    display: flex; gap: 6px; padding: 6px;
+    background: var(--paper); border: 2px solid var(--ink); border-radius: var(--r);
+    box-shadow: 0 4px 0 var(--ink-15);
+  }
+  .slot {
+    width: 58px; height: 58px; border-radius: 2px; background: var(--paper-2);
+    border: 2px solid transparent; position: relative;
+    display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px;
+    font: 600 10px/1.1 var(--mono); letter-spacing: 0.04em; text-align: center;
+    color: var(--ink-70); overflow: hidden;
+    transition: border-color 120ms var(--ease), background 120ms var(--ease);
+  }
+  .slot .key {
+    position: absolute; top: 3px; left: 4px;
+    font: 700 9px/1 var(--mono); color: var(--ink-45);
+  }
+  .slot .icon { position: absolute; inset: 12px 8px 18px; }
+  .slot.on { background: var(--signal); border-color: var(--ink); }
+  .slot.on .key, .slot.on { color: var(--ink); }
+
+  /* --- palette ------------------------------------------------------------- */
+  #palette {
+    position: fixed; right: 22px; bottom: 22px;
+    display: grid; grid-template-columns: repeat(4, 26px); gap: 4px; padding: 6px;
+    background: var(--paper); border: 2px solid var(--ink); border-radius: var(--r);
+    box-shadow: 0 4px 0 var(--ink-15);
+  }
+  .swatch { width: 26px; height: 26px; border-radius: 2px; border: 2px solid transparent; }
+  .swatch.on { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--paper); }
+
+  /* --- status line --------------------------------------------------------- */
+  #status {
+    position: fixed; left: 22px; top: 18px;
+    font: 500 11px/1.6 var(--mono); letter-spacing: 0.06em;
+    color: var(--ink); background: var(--paper); padding: 8px 12px;
+    border: 2px solid var(--ink); border-radius: var(--r);
+    box-shadow: 0 4px 0 var(--ink-15); white-space: pre;
+  }
+  #status b { font-weight: 700; }
+
+  /* --- hints --------------------------------------------------------------- */
+  #hints {
+    position: fixed; left: 22px; bottom: 22px;
+    font: 500 11px/1.9 var(--mono); letter-spacing: 0.04em;
+    color: var(--ink); background: var(--paper); padding: 10px 14px;
+    border: 2px solid var(--ink); border-radius: var(--r);
+    box-shadow: 0 4px 0 var(--ink-15);
+  }
+  #hints kbd {
+    font: 700 10px/1 var(--mono); background: var(--ink); color: var(--paper);
+    padding: 3px 5px; border-radius: 2px; margin-right: 2px;
+  }
+
+  /* --- gate (click to play / pause) ---------------------------------------- */
+  #gate {
+    position: fixed; inset: 0; pointer-events: auto; display: grid; place-items: center;
+    background: rgba(25, 23, 18, 0.55); backdrop-filter: blur(2px);
+  }
+  #gate.hidden { display: none; }
+  .card {
+    background: var(--paper); border: 3px solid var(--ink); border-radius: var(--r);
+    box-shadow: 0 8px 0 rgba(25, 23, 18, 0.35);
+    padding: 34px 40px; text-align: center; max-width: 460px;
+  }
+  .card h1 {
+    margin: 0 0 6px; font: 800 30px/1.05 var(--sans); letter-spacing: -0.02em;
+  }
+  .card .sub {
+    margin: 0 0 22px; font: 500 11px/1.6 var(--mono);
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-45);
+  }
+  .card p { margin: 0 0 18px; font: 400 13px/1.6 var(--sans); color: var(--ink-70); }
+  .btn {
+    display: inline-block; cursor: pointer; border: 2px solid var(--ink); border-radius: 2px;
+    background: var(--signal); color: var(--ink);
+    font: 700 13px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 14px 26px; box-shadow: 0 4px 0 var(--signal-deep);
+    transition: transform 90ms var(--ease), box-shadow 90ms var(--ease);
+  }
+  .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--signal-deep); }
+
+  #loading { font: 500 11px/1.6 var(--mono); letter-spacing: 0.14em; color: var(--ink-45); }
+</style>
+
+<div id="hud" hidden>
+  <div id="crosshair"></div>
+  <div id="status"></div>
+  <div id="hints">
+    <kbd>WSAD</kbd> ruch &nbsp; <kbd>SPACJA</kbd> skok &nbsp; <kbd>SHIFT</kbd> bieg<br>
+    <kbd>LPM</kbd> postaw &nbsp; <kbd>PPM</kbd> usuń &nbsp; <kbd>ŚPM</kbd> pipeta<br>
+    <kbd>R</kbd> obróć &nbsp; <kbd>1–6</kbd> część &nbsp; <kbd>SCROLL</kbd> zmień<br>
+    <kbd>C</kbd> malowanie &nbsp; <kbd>ESC</kbd> pauza
+  </div>
+  <div id="hotbar"></div>
+  <div id="palette"></div>
+</div>
+
+<div id="gate">
+  <div class="card">
+    <h1>Gzowo Builders</h1>
+    <div class="sub">Sandbox · Kreatywny</div>
+    <p id="gate-text">Buduj z klocków, testuj na miejscu, patrz jak się rozpada.</p>
+    <div id="loading">ŁADOWANIE…</div>
+    <div class="btn" id="gate-btn" hidden>Wejdź</div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+  "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.12.0/rapier.es.js"
+} }
+</script>
+<script type="module" src="./src/main.js"></script>

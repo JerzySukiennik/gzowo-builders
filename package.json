@@ -1,0 +1,11 @@
+{
+  "name": "gzowo-builders",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Gzowo Builders - creative-only physics building sandbox with LAN co-op",
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.js",
+    "serve": "python3 -m http.server 8290"
+  }
+}
