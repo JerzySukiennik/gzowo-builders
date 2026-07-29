@@ -53,7 +53,7 @@ async function boot() {
   const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.06, 400);
 
   const meadow = await buildMeadow(scene, RAPIER, world, renderer);
-  const worldTargets = scene.children.filter((o) => o.isMesh);
+  const worldTargets = meadow.targets;
 
   const player = new Player(RAPIER, world, [0, 2, 8]);
   const construction = new Construction(RAPIER, world, new ConstructionView(scene));
@@ -114,6 +114,7 @@ async function boot() {
 
   // --- loop ----------------------------------------------------------------
   const clock = new StepClock();
+  let holdRemove = 0;
   let last = performance.now();
   let fps = 60, fpsAcc = 0, fpsN = 0;
 
@@ -153,10 +154,19 @@ async function boot() {
     meadow.sun.target.position.set(camera.position.x, 0, camera.position.z);
     meadow.sun.target.updateMatrixWorld();
 
-    if (input.locked) builder.update(player);
+    if (input.locked) {
+      builder.update(player);
+      // Holding the right button keeps clearing, on a timer slow enough that a
+      // single click still means a single part.
+      if (input.mouseDown(2)) {
+        holdRemove -= dt;
+        if (holdRemove <= 0) { holdRemove = 0.12; useAndSound(builder, audio, 'secondary'); }
+      } else holdRemove = 0;
+    }
 
     fpsAcc += dt; fpsN++;
     if (fpsAcc >= 0.5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
+    builder.lastThrottle = drive.get(player.seat?.rec.key)?.throttle ?? 0;
     if (input.locked) hud.update(builder.status(player), fps);
 
     renderer.render(scene, camera);
@@ -222,11 +232,13 @@ function interact(player, builder) {
 function handleEvents(events, builder, player, audio) {
   for (const e of events) {
     if (e.type === 'mouse') {
-      if (e.button === 0) { const was = builder.construction.count; builder.primary();
-        if (builder.construction.count !== was) audio?.place(); }
-      else if (e.button === 2) { const was = builder.construction.count; builder.secondary();
-        if (builder.construction.count !== was) audio?.remove(); }
-      else if (e.button === 1) builder.pipette();
+      if (e.button === 0) {
+        // A part is dragged out; a tool acts the moment you press it.
+        if (e.down) { if (!builder.beginFill()) useAndSound(builder, audio, 'primary'); }
+        else if (builder.commitFill() > 0) audio?.place();
+      } else if (e.button === 2 && e.down) {
+        useAndSound(builder, audio, 'secondary');
+      } else if (e.button === 1 && e.down) builder.pipette();
     } else if (e.type === 'wheel') {
       if (builder.tool === 'paint') builder.cycleColor(e.dir);
       else builder.cycleSlot(e.dir);
@@ -241,6 +253,14 @@ function handleEvents(events, builder, player, audio) {
       }
     }
   }
+}
+
+function useAndSound(builder, audio, verb) {
+  const was = builder.construction.count;
+  builder[verb]();
+  const now = builder.construction.count;
+  if (now > was) audio?.place();
+  else if (now < was) audio?.remove();
 }
 
 // R rotates yaw; Shift+R tips the part on its side.

@@ -27,7 +27,7 @@ export class Input {
 
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === canvas;
-      if (!this.locked) this.keys.clear();
+      if (!this.locked) { this.keys.clear(); this.buttons.clear(); }
       this.onLockChange?.(this.locked);
     });
 
@@ -37,9 +37,18 @@ export class Input {
       this.dy += e.movementY * this.sensitivity;
     });
 
+    // Down and up are separate events, not one click: holding the left button
+    // is how you drag out a wall, and holding the right one is how you clear a
+    // mistake without twenty clicks.
+    this.buttons = new Set();
     canvas.addEventListener('mousedown', (e) => {
       if (!this.locked) return;
-      this.events.push({ type: 'mouse', button: e.button });
+      this.buttons.add(e.button);
+      this.events.push({ type: 'mouse', button: e.button, down: true });
+    });
+    addEventListener('mouseup', (e) => {
+      if (!this.buttons.delete(e.button)) return;
+      this.events.push({ type: 'mouse', button: e.button, down: false });
     });
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -54,6 +63,8 @@ export class Input {
   lock() { this.canvas.requestPointerLock(); }
 
   down(code) { return this.keys.has(code); }
+
+  mouseDown(button) { return this.buttons.has(button); }
 
   /** Consume the mouse-look delta accumulated since the last call. */
   takeLook() {

@@ -82,6 +82,11 @@ export async function buildMeadow(scene, RAPIER, world, renderer) {
   pad.receiveShadow = true;
   scene.add(pad);
 
+  // What the build cursor is allowed to aim at. Scenery is deliberately absent:
+  // a grass blade is a Mesh like any other, and letting the cursor snap to one
+  // means the grid you build on is a leaf's idea of which way is up.
+  const targets = [terrain.mesh, pad];
+
   // --- test furniture: the things you drive at on purpose -------------------
   const props = [
     { size: [11, 1.3, 7], pos: [24, 0, 2], rot: -0.16, color: 0xb9a882 },
@@ -89,7 +94,7 @@ export async function buildMeadow(scene, RAPIER, world, renderer) {
     { size: [8, 0.5, 8], pos: [-24, 0.25, 8], rot: 0, color: 0xc9bb99 },
     { size: [24, 0.4, 1], pos: [0, 0.2, 27], rot: 0, color: 0xc9bb99 },
   ];
-  for (const p of props) addStaticBox(scene, RAPIER, world, p);
+  for (const p of props) targets.push(addStaticBox(scene, RAPIER, world, p));
 
   // --- greenery -------------------------------------------------------------
   const kinds = await loadScatterKinds();
@@ -97,7 +102,7 @@ export async function buildMeadow(scene, RAPIER, world, renderer) {
   const grass = buildGrass(scene);
   const sky = buildSky(scene, sun.position);
 
-  return { sun, terrain, planted, grass, sky };
+  return { sun, terrain, planted, grass, sky, targets };
 }
 
 /**

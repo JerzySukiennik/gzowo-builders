@@ -57,17 +57,26 @@ export class Hud {
     this.swatches.forEach((el, i) => el.classList.toggle('on', !s.driving && i === s.color));
 
     const line = s.driving
-      ? `<b>ZA KIEROWNICĄ</b>   ${s.speed} km/h   KOŁA ${s.wheels}   ` +
-        `MOC ${s.engines} kN   E — WYSIĄDŹ   V — KAMERA   ${fps} FPS`
+      ? `<b>${String(s.speed).padStart(3, ' ')} km/h</b>  ${bar(s.throttle)}  ` +
+        `KOŁA ${s.grounded}/${s.wheels}   MOC ${s.engines} kN   ` +
+        (s.mechs ? `MECHANIZMY ${s.mechs}   ` : '') +
+        `E — WYSIĄDŹ   V — KAMERA   ${fps} FPS`
       : `${s.barName}  <b>${s.held.toUpperCase()}</b>   ` +
         (s.toolHint ? `${s.toolHint}   ` : (s.auto ? 'OBRÓT AUTO   ' : `OBRÓT ${s.yaw}°/${s.pitch}°   `)) +
         `CZĘŚCI ${s.count}   BRYŁY ${s.bodies}   ` +
+        (s.filling ? `<b>${s.filling} SZT.</b>   ` : '') +
         (s.wiring ? '<b>WYBIERZ CEL KABLA</b>   ' : '') +
         (s.seatHere ? '<b>E — WSIĄDŹ</b>   ' : '') +
         (s.unpaintable ? '<b>TEJ CZĘŚCI SIĘ NIE MALUJE</b>   ' : '') +
         `${fps} FPS`;
     if (line !== this._last) { this.statusEl.innerHTML = line; this._last = line; }
   }
+}
+
+/** A throttle read-out you can see without reading: eight cells of bar. */
+function bar(v) {
+  const n = Math.round(Math.min(1, Math.abs(v ?? 0)) * 8);
+  return (v < 0 ? '&lt;' : ' ') + '▮'.repeat(n) + '▯'.repeat(8 - n);
 }
 
 const TOOL_GLYPH = {
