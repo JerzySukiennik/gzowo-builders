@@ -18,6 +18,7 @@ import { Session } from './net/session.js';
 import { NetClient } from './net/client.js';
 import { Saves } from './net/save.js';
 import { Audio } from './audio.js';
+import { Particles } from './fx/particles.js';
 import { loadPartModels } from './render/models.js';
 
 
@@ -61,11 +62,12 @@ async function boot() {
   const net = new NetClient(construction, session, scene);
   const saves = new Saves(construction, net);
   const audio = new Audio();
+  const fx = new Particles(scene);
   const builder = new Builder(scene, construction, camera, worldTargets, session);
   const hud = new Hud();
 
   // Debug handle: the console is the only inspector this project has.
-  globalThis.GB = { THREE, scene, camera, renderer, world, RAPIER, player, construction, builder, input, hud, session, net, saves, audio };
+  globalThis.GB = { THREE, scene, camera, renderer, world, RAPIER, player, construction, builder, input, hud, session, net, saves, audio, fx, meadow };
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
@@ -142,6 +144,10 @@ async function boot() {
     } else audio.drive(0, false);
 
     player.applyToCamera(camera);
+    meadow.grass.update(dt);
+    meadow.sky.update(dt, camera.position);
+    fx.update(dt);
+    spitDust(construction, fx);
     // Keep the shadow frustum around the builder rather than the origin.
     meadow.sun.position.set(camera.position.x + 38, 54, camera.position.z + 26);
     meadow.sun.target.position.set(camera.position.x, 0, camera.position.z);
@@ -155,6 +161,21 @@ async function boot() {
 
     renderer.render(scene, camera);
   });
+}
+
+/** Wheels that are working throw a little of the meadow up behind them. */
+function spitDust(construction, fx) {
+  for (const rec of construction.bodies.values()) {
+    const v = rec.vehicle;
+    if (!v?.wheels.length) continue;
+    const speed = Math.hypot(rec.body.linvel().x, rec.body.linvel().z);
+    if (speed < 2.2) continue;
+    for (const w of v.wheels) {
+      if (!w.grounded || Math.random() > 0.16) continue;
+      const p = w.local.clone().applyQuaternion(rec.group.quaternion).add(rec.group.position);
+      fx.dust(p.x, p.y - w.spec.radius, p.z, Math.min(1, speed / 9));
+    }
+  }
 }
 
 /**

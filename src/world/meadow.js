@@ -12,6 +12,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { FILTER } from '../physics/world.js';
 import { PAD_RADIUS, WORLD, buildTerrain, heightAt } from './terrain.js';
 import { scatter } from './scatter.js';
+import { buildGrass } from './grass.js';
+import { buildSky } from './sky.js';
 
 export const GROUND_SIZE = WORLD;
 
@@ -46,8 +48,7 @@ function skyEnvironment(renderer) {
 }
 
 export async function buildMeadow(scene, RAPIER, world, renderer) {
-  scene.background = new THREE.Color(0x8fc7e8);
-  scene.fog = new THREE.Fog(0x9ecbe6, 120, 300);
+  scene.fog = new THREE.Fog(0xa8cfe6, 130, 320);
   scene.environment = skyEnvironment(renderer);
 
   // --- light: one hard sun for chunky shadows, sky bounce for the rest ------
@@ -93,8 +94,10 @@ export async function buildMeadow(scene, RAPIER, world, renderer) {
   // --- greenery -------------------------------------------------------------
   const kinds = await loadScatterKinds();
   const planted = kinds.length ? scatter(scene, RAPIER, world, kinds) : [];
+  const grass = buildGrass(scene);
+  const sky = buildSky(scene, sun.position);
 
-  return { sun, terrain, planted };
+  return { sun, terrain, planted, grass, sky };
 }
 
 /**
