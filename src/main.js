@@ -46,7 +46,7 @@ async function boot() {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.06, 400);
 
-  const meadow = buildMeadow(scene, RAPIER, world, renderer);
+  const meadow = await buildMeadow(scene, RAPIER, world, renderer);
   const worldTargets = scene.children.filter((o) => o.isMesh);
 
   const player = new Player(RAPIER, world, [0, 2, 8]);

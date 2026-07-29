@@ -7,11 +7,13 @@
 // things you drive on — carries over unchanged.
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { FILTER } from '../physics/world.js';
+import { PAD_RADIUS, WORLD, buildTerrain, heightAt } from './terrain.js';
+import { scatter } from './scatter.js';
 
-export const GROUND_SIZE = 220;
-const GRASS = 0x7fb347;
-const GRASS_DARK = 0x6ba03c;
+export const GROUND_SIZE = WORLD;
 
 /**
  * A two-stop sky-and-grass gradient, blurred into an environment map.
@@ -43,9 +45,9 @@ function skyEnvironment(renderer) {
   return env;
 }
 
-export function buildMeadow(scene, RAPIER, world, renderer) {
+export async function buildMeadow(scene, RAPIER, world, renderer) {
   scene.background = new THREE.Color(0x8fc7e8);
-  scene.fog = new THREE.Fog(0x8fc7e8, 90, 200);
+  scene.fog = new THREE.Fog(0x9ecbe6, 120, 300);
   scene.environment = skyEnvironment(renderer);
 
   // --- light: one hard sun for chunky shadows, sky bounce for the rest ------
@@ -58,8 +60,8 @@ export function buildMeadow(scene, RAPIER, world, renderer) {
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 160;
-  const s = 46;
+  sun.shadow.camera.far = 170;
+  const s = 52;
   sun.shadow.camera.left = -s; sun.shadow.camera.right = s;
   sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
   sun.shadow.bias = -0.0006;
@@ -67,50 +69,76 @@ export function buildMeadow(scene, RAPIER, world, renderer) {
   scene.add(sun);
   scene.add(sun.target);
 
-  // --- ground --------------------------------------------------------------
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE),
-    new THREE.MeshStandardMaterial({ color: GRASS, roughness: 1 }),
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
+  const terrain = buildTerrain(scene, RAPIER, world);
 
-  const groundBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -2, 0));
-  const groundCol = RAPIER.ColliderDesc.cuboid(GROUND_SIZE / 2, 2, GROUND_SIZE / 2)
-    .setFriction(1.0)
-    .setCollisionGroups(FILTER.TERRAIN);
-  world.createCollider(groundCol, groundBody);
-
-  // --- the build pad: a paler slab so you can see the grid you build on -----
+  // --- the build pad: a mown circle, so the flat ground reads as deliberate -
   const pad = new THREE.Mesh(
-    new THREE.PlaneGeometry(32, 32),
-    new THREE.MeshStandardMaterial({ color: GRASS_DARK, roughness: 1 }),
+    new THREE.CircleGeometry(PAD_RADIUS, 64),
+    new THREE.MeshStandardMaterial({ color: 0x6ba03c, roughness: 1 }),
   );
   pad.rotation.x = -Math.PI / 2;
-  pad.position.y = 0.01;
+  pad.position.y = 0.02;
   pad.receiveShadow = true;
   scene.add(pad);
 
-  // --- test furniture ------------------------------------------------------
+  // --- test furniture: the things you drive at on purpose -------------------
   const props = [
-    { size: [10, 1.2, 6], pos: [22, 0.0, 0], rot: -0.16, color: 0xb9a882 },   // gentle ramp
-    { size: [8, 1.6, 6], pos: [22, 0.0, -14], rot: -0.36, color: 0xb9a882 },  // steep ramp
-    { size: [7, 0.5, 7], pos: [-20, 0.25, 6], rot: 0, color: 0xc9bb99 },      // step
-    { size: [22, 0.4, 1], pos: [0, 0.2, 24], rot: 0, color: 0xc9bb99 },       // kerb
+    { size: [11, 1.3, 7], pos: [24, 0, 2], rot: -0.16, color: 0xb9a882 },
+    { size: [9, 1.9, 7], pos: [24, 0, -16], rot: -0.34, color: 0xb9a882 },
+    { size: [8, 0.5, 8], pos: [-24, 0.25, 8], rot: 0, color: 0xc9bb99 },
+    { size: [24, 0.4, 1], pos: [0, 0.2, 27], rot: 0, color: 0xc9bb99 },
   ];
   for (const p of props) addStaticBox(scene, RAPIER, world, p);
 
-  return { sun, ground };
+  // --- greenery -------------------------------------------------------------
+  const kinds = await loadScatterKinds();
+  const planted = kinds.length ? scatter(scene, RAPIER, world, kinds) : [];
+
+  return { sun, terrain, planted };
+}
+
+/**
+ * Load the scenery models. They are not parts — no cell box, no collider built
+ * from a catalogue entry — so they skip the part loader entirely and keep their
+ * own materials and their own geometry, whatever shape Blender gave them.
+ */
+async function loadScatterKinds() {
+  const loader = new GLTFLoader();
+  const wanted = [
+    { id: 'tree_pine', file: 'assets/models/tree_pine.glb', density: 5, scale: [0.85, 1.35], trunk: { r: 0.22, h: 5.0 } },
+    { id: 'tree_oak', file: 'assets/models/tree_oak.glb', density: 4, scale: [0.85, 1.30], trunk: { r: 0.28, h: 3.2 } },
+    { id: 'bush', file: 'assets/models/bush.glb', density: 6, scale: [0.7, 1.4], trunk: null },
+    { id: 'rock', file: 'assets/models/rock.glb', density: 2, scale: [0.6, 1.6], trunk: null },
+  ];
+  const out = [];
+  for (const w of wanted) {
+    try {
+      const gltf = await loader.loadAsync(w.file);
+      gltf.scene.updateMatrixWorld(true);
+      const meshes = [];
+      gltf.scene.traverse((o) => { if (o.isMesh) meshes.push(o); });
+      if (!meshes.length) continue;
+      const geometry = meshes.length === 1
+        ? meshes[0].geometry
+        : mergeGeometries(meshes.map((m) => m.geometry.clone().applyMatrix4(m.matrixWorld)), true);
+      if (!geometry) continue;
+      const material = meshes.length === 1 ? meshes[0].material : meshes.map((m) => m.material);
+      out.push({ ...w, geometry, material });
+    } catch (err) {
+      console.warn(`[meadow] ${w.id}: ${err.message} — bez tej roślinności`);
+    }
+  }
+  return out;
 }
 
 function addStaticBox(scene, RAPIER, world, { size, pos, rot = 0, color }) {
   const [w, h, d] = size;
+  const y = heightAt(pos[0], pos[2]);
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
     new THREE.MeshStandardMaterial({ color, roughness: 0.9 }),
   );
-  mesh.position.set(pos[0], pos[1] + h / 2, pos[2]);
+  mesh.position.set(pos[0], y + pos[1] + h / 2, pos[2]);
   mesh.rotation.z = rot;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
