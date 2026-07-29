@@ -14,9 +14,17 @@ import { CELL } from '../shared/grid.js';
 
 const BEVEL = 0.02;
 const cache = new Map();
+const modelled = new Map();
+
+/** A Blender model has landed for this part — it wins over the placeholder. */
+export function registerModel(partId, geometry) {
+  modelled.set(partId, geometry);
+  cache.delete(partId);
+}
 
 /** Cached geometry for a part definition, centred on its own origin. */
 export function geometryFor(part) {
+  if (modelled.has(part.id)) return modelled.get(part.id);
   if (cache.has(part.id)) return cache.get(part.id);
   const w = part.size[0] * CELL, h = part.size[1] * CELL, d = part.size[2] * CELL;
   let geo;

@@ -12,6 +12,7 @@ import { Player } from './player/player.js';
 import { Construction } from './build/construction.js';
 import { Builder } from './build/builder.js';
 import { Hud } from './ui/hud.js';
+import { loadPartModels } from './render/models.js';
 import { HOTBAR } from './shared/parts.js';
 
 const gate = document.getElementById('gate');
@@ -26,7 +27,8 @@ boot().catch((err) => {
 });
 
 async function boot() {
-  const { RAPIER, world } = await initPhysics();
+  const [{ RAPIER, world }, modelCount] = await Promise.all([initPhysics(), loadPartModels()]);
+  console.log(`[boot] modele części: ${modelCount}/${HOTBAR.length}`);
 
   // --- renderer ------------------------------------------------------------
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });

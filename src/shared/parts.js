@@ -31,7 +31,7 @@ const PART_LIST = [
     category: CATEGORY.STRUCTURE,
     size: [4, 4, 4],
     shape: 'box',
-    model: null,
+    model: 'assets/models/block.glb',
     hotbar: 1,
   },
   {
@@ -40,7 +40,7 @@ const PART_LIST = [
     category: CATEGORY.STRUCTURE,
     size: [2, 2, 2],
     shape: 'box',
-    model: null,
+    model: 'assets/models/block_small.glb',
     hotbar: 2,
   },
   {
@@ -49,7 +49,7 @@ const PART_LIST = [
     category: CATEGORY.STRUCTURE,
     size: [4, 1, 4],
     shape: 'box',
-    model: null,
+    model: 'assets/models/panel.glb',
     hotbar: 3,
   },
   {
@@ -58,7 +58,7 @@ const PART_LIST = [
     category: CATEGORY.STRUCTURE,
     size: [8, 2, 2],
     shape: 'box',
-    model: null,
+    model: 'assets/models/beam.glb',
     hotbar: 4,
   },
   {
@@ -67,7 +67,7 @@ const PART_LIST = [
     category: CATEGORY.STRUCTURE,
     size: [4, 4, 4],
     shape: 'wedge',
-    model: null,
+    model: 'assets/models/wedge.glb',
     hotbar: 5,
   },
   {
@@ -76,7 +76,7 @@ const PART_LIST = [
     category: CATEGORY.STRUCTURE,
     size: [4, 4, 4],
     shape: 'corner',
-    model: null,
+    model: 'assets/models/corner.glb',
     hotbar: 6,
   },
 ];

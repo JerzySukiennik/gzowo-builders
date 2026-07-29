@@ -21,6 +21,11 @@ const REACH = 7.0;
 // lands inside the thinnest part in the catalogue (the 1-cell panel).
 const INSET = CELL * 0.25;
 
+// The Blender parts are chamfered and panelled, so the default 1° edge
+// threshold would outline every facet of every bevel — a wireframe ball of
+// fluff. 30° keeps the silhouette and the panel lines and drops the rest.
+const outlineOf = (geo) => new THREE.EdgesGeometry(geo, 30);
+
 export class Builder {
   constructor(scene, construction, camera, worldTargets) {
     this.scene = scene;
@@ -43,7 +48,7 @@ export class Builder {
     this.ghost.raycast = () => {};
     scene.add(this.ghost);
 
-    this.edges = new THREE.LineSegments(new THREE.EdgesGeometry(this.ghost.geometry), ghostEdge);
+    this.edges = new THREE.LineSegments(outlineOf(this.ghost.geometry), ghostEdge);
     this.edges.visible = false;
     this.edges.raycast = () => {};
     scene.add(this.edges);
@@ -74,7 +79,7 @@ export class Builder {
     const geo = geometryFor(this.part);
     this.ghost.geometry = geo;
     this.edges.geometry.dispose();
-    this.edges.geometry = new THREE.EdgesGeometry(geo);
+    this.edges.geometry = outlineOf(geo);
   }
 
   /** Recompute what the crosshair is over. Call once per rendered frame. */
