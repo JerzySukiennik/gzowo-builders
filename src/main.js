@@ -132,6 +132,21 @@ async function boot() {
     if (!locked) gateBtn.textContent = 'Wróć do gry';
   };
 
+  // ?demo=1 — for the screenshot tool. requestPointerLock() needs a real user
+  // gesture and never resolves in an automated browser, so a driven capture would
+  // otherwise show only the empty meadow behind the gate. This skips the gate and
+  // drops one prefab in front of spawn, without touching normal play at all.
+  if (new URLSearchParams(location.search).has('demo')) {
+    audio.start();
+    gate.classList.add('hidden');
+    hud.show();
+    input.locked = true;
+    import('./shared/prefabs.js').then(({ PREFABS, PREFAB_IDS }) => {
+      const id = PREFAB_IDS.find((x) => /car|kart|chassis|podwozie|auto/i.test(x)) ?? PREFAB_IDS[0];
+      if (id) session.stamp(id, { x: 0, y: 0, z: -2 }, '#8FC13F', null);
+    });
+  }
+
   // --- loop ----------------------------------------------------------------
   const clock = new StepClock();
   let holdRemove = 0;
