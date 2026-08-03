@@ -143,7 +143,7 @@ async function boot() {
     input.locked = true;
     import('./shared/prefabs.js').then(({ PREFABS, PREFAB_IDS }) => {
       const id = PREFAB_IDS.find((x) => /car|kart|chassis|podwozie|auto/i.test(x)) ?? PREFAB_IDS[0];
-      if (id) session.stamp(id, { x: 0, y: 0, z: -2 }, '#8FC13F', null);
+      if (id) session.stamp(id, [0, 0, -2], '#8FC13F', null);
     });
   }
 
